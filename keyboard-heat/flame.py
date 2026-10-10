@@ -1419,6 +1419,13 @@ def log_image_load(path, slot="back"):
     不用 Python 循环 —— 2560×1696 那张图逐像素跑要 1 秒多，两张就是启动时肉眼
     可见的卡顿；换成 C 实现是毫秒级，结果完全一致（_test_flame.py 有对拍）。
     """
+    import sys, os
+    if not os.path.isabs(path) and getattr(sys, "frozen", False):
+        # onefile: 相对资源(柴堆图)位于只读的 _MEIPASS
+        base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+        cand = os.path.join(base, path)
+        if os.path.exists(cand):
+            path = cand
     try:
         from PIL import Image, ImageChops
     except ImportError:

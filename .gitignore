@@ -27,3 +27,8 @@ keyboard-heat/data/heat-report*.html
 
 # ===== 生成的篝火素材(体积大、非源码) =====
 generated-images/
+
+# ===== PyInstaller 构建产物 =====
+dist/
+build/
+*.spec

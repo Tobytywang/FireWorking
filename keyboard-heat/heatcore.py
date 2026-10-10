@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+import sys
+import shutil
 import ctypes
 import json
 import sqlite3
@@ -21,7 +23,14 @@ import time
 from collections import deque
 from pathlib import Path
 
-PROJECT_DIR = Path(__file__).resolve().parent
+if getattr(sys, "frozen", False):
+    # PyInstaller onefile: 程序与依赖解压到系统临时目录 _MEIPASS(只读),
+    # 但配置/数据库/报告必须可写 —— 放到 exe 同目录。
+    PROJECT_DIR = Path(sys.executable).resolve().parent
+    RES_DIR = Path(getattr(sys, "_MEIPASS", str(PROJECT_DIR)))  # 只读资源基(模板/柴堆图)
+else:
+    PROJECT_DIR = Path(__file__).resolve().parent
+    RES_DIR = PROJECT_DIR
 DEFAULT_CONFIG_PATH = PROJECT_DIR / "config.json"
 
 SCHEMA = """
@@ -185,6 +194,12 @@ def heat_hex(frac):
 
 def load_config(path=None):
     path = Path(path or DEFAULT_CONFIG_PATH)
+    if getattr(sys, "frozen", False) and not path.exists():
+        # onefile: 只读模板里的 config 复制到 exe 同目录,之后用户改的是可写副本
+        src = RES_DIR / "config.json"
+        if src.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(src, path)
     if not path.exists():
         raise FileNotFoundError("配置文件不存在：%s" % path)
     with path.open("r", encoding="utf-8") as fh:

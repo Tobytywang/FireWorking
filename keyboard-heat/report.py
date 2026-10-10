@@ -15,9 +15,9 @@ import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from heatcore import PROJECT_DIR, cfg_get, ensure_schema
+from heatcore import PROJECT_DIR, RES_DIR, cfg_get, ensure_schema
 
-TEMPLATE_PATH = PROJECT_DIR / "report_template.html"
+TEMPLATE_PATH = RES_DIR / "report_template.html"
 
 DATA_SLOT = "__DATA_JSON__"
 META_SLOT = "__META_JSON__"
