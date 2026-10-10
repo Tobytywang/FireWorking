@@ -1,0 +1,9 @@
+/* 复现「本轮改前」的卡片头条（仅用于对照图，不动源文件）：
+   ① 标题用 --fg3（白底 2.83:1，低于 AA）；
+   ② 角标硬编码 top:11px，与「由 padding-top 推出的标题」错行（hero 4px / 其余 2px）；
+   ③ 各组 padding 恢复改前数值（hero 15/15、总览与倒计时 13/13）。 */
+.tile{--padT:13px;padding-bottom:13px}
+.tile .k{color:var(--fg3)}
+.tile .tk{top:11px}
+.hero-stats .tile{padding:15px 17px}
+.cd-sum .tile{padding:13px 15px}

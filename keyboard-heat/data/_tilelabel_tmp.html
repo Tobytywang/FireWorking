@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>键盘热度报告</title>
+<style>
+:root{
+  --bg:#f6f4f1; --card:#ffffff; --card-2:#faf8f5;
+  --line:rgba(40,33,26,.12); --line-soft:rgba(40,33,26,.06);
+  --fg:#211b15; --fg2:#6f655b; --fg3:#a3988c;
+  --accent:#e8590c; --accent-2:#f2873a; --accent-soft:#fbeede;
+  --good:#2f9e44; --warn:#e8590c; --hot:#c92a2a;
+  --mouse:rgba(33,27,21,.32);
+  --kb:#2f6fb0; --ms:#e8590c; --tm:#2f9e44; --cd:#6741d9;
+  --shadow:0 1px 2px rgba(40,33,26,.04), 0 12px 30px -20px rgba(40,33,26,.26);
+  --shadow-sm:0 1px 2px rgba(40,33,26,.03), 0 6px 16px -12px rgba(40,33,26,.13);
+  --radius:16px;
+}
+:root[data-theme="dark"]{
+  --bg:#16120d; --card:#1f1912; --card-2:#191309;
+  --line:rgba(255,240,225,.13); --line-soft:rgba(255,240,225,.07);
+  --fg:#f3ece2; --fg2:#b6a994; --fg3:#7d7060;
+  --accent:#ff7a33; --accent-2:#ff9d5c; --accent-soft:#2c1c10;
+  --good:#51cf66; --warn:#ff7a33; --hot:#ff6b6b;
+  --mouse:rgba(255,240,225,.30);
+  --kb:#5aa0e0; --ms:#ff7a33; --tm:#51cf66; --cd:#9775fa;
+  --shadow:0 1px 2px rgba(0,0,0,.35), 0 16px 40px -22px rgba(0,0,0,.7);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.3), 0 8px 20px -16px rgba(0,0,0,.6);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+  font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased;padding-bottom:70px}
+.wrap{max-width:1100px;margin:0 auto;padding:0 24px}
+header{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--bg) 86%,transparent);
+  backdrop-filter:blur(14px) saturate(1.4);border-bottom:1px solid var(--line)}
+.hdr{display:flex;align-items:center;gap:14px;padding:13px 0;flex-wrap:wrap}
+.hdr h1{font-size:15px;font-weight:700;margin:0;letter-spacing:.01em}
+.hdr .range{font-size:12px;color:var(--fg3);font-family:Consolas,monospace}
+.actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+button{font:inherit;font-size:12.5px;padding:7px 13px;border-radius:9px;cursor:pointer;
+  background:var(--card);color:var(--fg2);border:1px solid var(--line);transition:.18s}
+button:hover:not(:disabled){color:var(--fg);border-color:var(--fg3);transform:translateY(-1px)}
+button:disabled{opacity:.4;cursor:default}
+button.primary{background:var(--accent);color:#fff;border-color:transparent}
+button.primary:hover{filter:brightness(1.08);color:#fff}
+button.ghost{background:transparent}
+section{margin-top:40px}
+h2{font-size:15px;font-weight:700;color:var(--fg);margin:0 0 16px;letter-spacing:.01em;
+  display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding-left:13px;border-left:3px solid var(--accent)}
+h2 span{color:var(--fg3);font-weight:400;font-size:12.5px;letter-spacing:0}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+  padding:20px;box-shadow:var(--shadow-sm);transition:.2s}
+.panel:hover{box-shadow:var(--shadow)}
+/* 图例是它所描述内容的「注脚」：墨迹右缘必须与内容右缘齐。
+   卡片内容铺满时（如周视图 .heat7）右缘就是卡片内容右缘，flex-end 天然对齐；
+   但活动日历的 .year-cal 是 max-content 居中、右缘内缩，此时 flex-end 会**比日历
+   右缘多出那段内缩量**（实测 1280 档 +32px、884 档 +17px）。
+   ⇒ 内缩量由 fitCalendar 实测后写到 --cal-inset，图例据此补等量的右内边距，
+   于是两者右缘恒齐；未设该变量的卡片退化为 0，行为不变。
+
+   ⚠ 同一处还有**垂直开销**问题（用户圈出"图例上面空了一大块"）：
+   注脚只需紧贴内容，不该另占一条空行。实测（探针 [_ui_geom_probe.py] 注脚带段）：
+     footGap  = 内容墨迹底 → 色块墨迹顶 = 22.7px（= .cal-scroll 6 + margin-top 14 + 半行距 2.7）
+     rowSlack = 行盒高 18.4 − 色块高 13 = 5.4px（中文行盒 ≈1.6em，比色块高出一大截，
+                这 5.4px 是**看不见**的空白）
+   修法：margin-top 收到 4px（footGap → 10px），并给 line-height:13px 让行盒
+   与色块等高（rowSlack → 0）。总开销 59.4 → 43px。
+   注意 line-height **只压行盒、不裁字形**：色块与文字都是 flex item，靠 align-items:center
+   居中，且 .legend 的祖先里没有裁剪盒（.cal-scroll 是兄弟节点，不是父节点），
+   所以不存在 _label_ab 里那种"overflow 裁剪 + line-height 过小"的组合。 */
+.legend{display:flex;flex-wrap:wrap;align-items:center;gap:6px;row-gap:6px;font-size:11.5px;
+  line-height:13px;color:var(--fg3);margin-top:4px;justify-content:flex-end;
+  padding-inline:var(--cal-inset,0px)}
+.legend i{width:13px;height:13px;border-radius:3px;display:inline-block}
+
+/* 视图切换：日历 ↔ 周×小时，二者占据同一卡片位置，靠 tab 切换 */
+.view-tabs{display:inline-flex;gap:4px;background:var(--card-2);border:1px solid var(--line);
+  border-radius:999px;padding:4px;margin-bottom:14px}
+.view-tabs .tab{border:0;background:transparent;font:inherit;font-size:13px;font-weight:600;
+  color:var(--fg2);padding:6px 18px;border-radius:999px;cursor:pointer;transition:.15s;white-space:nowrap}
+.view-tabs .tab:hover{color:var(--fg)}
+.view-tabs .tab.active{background:var(--accent);color:#fff;box-shadow:var(--shadow-sm)}
+.view-pane[hidden]{display:none}
+
+/* HERO —— 全页唯一的“重笔”：暖纸面 + 热度色点缀，去掉渐变与光晕 */
+.hero{background:var(--accent-soft);
+  border:1px solid var(--line);border-radius:20px;padding:28px 30px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.hero .tag{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;
+  color:var(--accent);background:var(--card);border:1px solid var(--line);padding:5px 12px;border-radius:999px}
+.hero .tag .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
+.hero h3{font-size:25px;font-weight:800;margin:18px 0 8px;letter-spacing:-.01em;color:var(--fg)}
+.hero p{margin:0;color:var(--fg2);font-size:13.5px;max-width:680px;line-height:1.7}
+.hero-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:24px}
+/* hero 三张卡也走「总览砖块」那套契约（顶色条 = 族色 / 右上角标 = 族名 / 标签左上 · 数值左下），
+   只把这组放大一号（它是全页的重笔）。卡片 321px 宽、内容仅 ~100px，
+   故用 .wide 的左列(标签/数值) + 右列(同源次要信息) 分担宽度，避免右侧空 208px。 */
+/* hero：左右略宽（17px）保留重笔感；下内边距与其余两组统一成 15px
+   （原来是 19px，用来把内容撑到跟总览砖一样高——现在卡高由 .tile 的 min-height 统一，不需要了）。
+   三组下内边距一致 ⇒ 大号数字的下沿落在同一条线上。 */
+.hero-stats .tile{padding:var(--padT) 17px 15px}
+.hero-stats .tile .v{font-size:27px}
+.hero-stats .tile .v small{font-size:13px;font-weight:600}
+/* 这条组的卡 ≥780px 视口时仍有 ≥235px（3 列），横排放得下（实测需内宽 ~186px：数值 90 + 间 16 + 右列 80），
+   故不让它跟着 ≤900 那条兜底退化成竖排；再窄（3 列只剩 ~180px）才真的退回竖排。
+   选择器比媒体查询里的 `.tile.wide`（0,2,0）更具体，无需 !important。 */
+@media (min-width:780px){
+  .hero-stats .tile.wide{flex-direction:row;align-items:stretch}
+  .hero-stats .tile.wide .wmain{flex:1 1 auto}
+  .hero-stats .tile.wide .wside{display:flex;white-space:nowrap;padding-bottom:2px}
+}
+/* hero 在 <780 真的竖排时，与总览那三块宽砖同理：次要信息必须挪到数值**上方**、
+   数字压底，否则它会占掉卡底那一行（实测 vTop 44 / 卡高 94，与其它组差 6px）。
+   这条与上面的 (min-width:780) 完全互补，不会互相覆盖。 */
+@media (max-width:779px){
+  .hero-stats .tile.wide{justify-content:flex-start;gap:0}
+  .hero-stats .tile.wide .wmain{display:contents}
+  .hero-stats .tile.wide .wside{order:1;display:block;white-space:normal;padding-bottom:0;line-height:1}
+  .hero-stats .tile.wide .v{order:2;margin-top:auto}
+}
+
+/* 总览：铺地砖式语义排布 —— 砖块大小不一、不强行同行列对齐；
+   排布语义（用户指定）：三「行」= 三组 —— 键盘行 / 鼠标行 / 时间行。
+   主砖「输入构成」（键盘/鼠标占比）**同属键盘行与鼠标行**，
+   故置于右侧、**纵向横跨这两行**（两行的行末），一眼读出「它同时属于这两行」；
+   时间行是独立维度，单独一行铺在底部（三块较宽、铺满整宽）。
+   每块顶部色条+右上角标=主题色（键盘冷蓝 / 鼠标暖橙 / 时间绿），自由排布下仍可读出聚类。
+   主砖的顶色条是「键盘蓝 → 鼠标橙」**撞色渐变**（它同时属于两类）；
+   全部砖共用**同一套文字位置**：标签在左上、数值在左下——主砖亦然。 */
+.tiles{display:grid;grid-template-columns:repeat(12,1fr);grid-auto-rows:88px;gap:12px;
+  grid-template-areas:
+    "kb1 kb1 kb2 kb2 kb3 kb3 comp comp comp comp comp comp"
+    "ms1 ms1 ms2 ms2 ms3 ms3 comp comp comp comp comp comp"
+    "tm1 tm1 tm1 tm1 tm2 tm2 tm2 tm2 tm3 tm3 tm3 tm3"}
+/* --padT = 卡片「头条基线」：标题与右上角标**由同一个数推出**（.tk 用 top:var(--padT)），
+   于是两者墨迹顶边天然同线；想让头条更贴 TOP 或更松，只改这一个数，不会再错行。
+   各组只改左右的 padding，纵向用 var(--padT) + 下内边距保持总高不变。 */
+/* --minH = 卡片统一高度（= 总览铺砖的 grid-auto-rows:88px）。
+   hero / 倒计时那两组是「内容撑高」（实测 80 / 69px），而大号数字是 space-between 里
+   贴底的那一项 → 卡高不同，数字到卡顶的距离就必然不同（实测 vTop 29 / 30 / 46，极差 17px，
+   用户看到的就是「鼠标占比的数字比鼠标滚轮的更靠上」）。钉住 min-height 后三组卡等高。 */
+.tile{position:relative;grid-area:var(--a);background:var(--card);border:1px solid var(--line);
+  --padT:11px;
+  border-radius:14px;padding:var(--padT) 15px 15px;overflow:hidden;box-shadow:var(--shadow-sm);transition:.2s;
+  min-height:88px;
+  display:flex;flex-direction:column;justify-content:space-between}
+.tile:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
+.tile::before{content:"";position:absolute;left:0;top:0;right:0;height:3px;background:var(--tc,var(--line))}
+.tile .tk{position:absolute;top:var(--padT);right:13px;font-size:10px;font-weight:700;letter-spacing:.05em;color:var(--tc,var(--fg3))}
+/* 标题是「卡片的名字」，不是注脚：原用 --fg3，白底只有 2.83:1（低于 WCAG AA 的 4.5:1），
+   而且与右列次要信息（.wside）同色同重 → 标题在观感上被降级成注释。
+   提到 --fg2：白底 5.69:1、暗色 7.54:1，标题与注释的层级一眼可分。 */
+.tile .k{font-size:12px;color:var(--fg2);margin:0;padding-right:34px}
+/* 行盒高度钉成 34px（而不是 line-height:1.05 这种「随字号走」的相对值）：
+   三组大号数字的字号本就不同（27 / 23 / 21px），相对行高会让墨迹在卡底上方各偏各的，
+   实测顶边仍再差 5–8px。钉死行盒后墨迹在行盒内垂直居中，顶/底两边都收到 ≤3px。 */
+.tile .v{font-size:23px;font-weight:800;font-family:Consolas,ui-monospace,monospace;letter-spacing:-.01em;
+  color:var(--fg);font-feature-settings:"tnum";line-height:34px;min-width:0}
+/* 单位的行高必须**自己收住**（line-height:1）：它只改了 font-size（11/13px）却继承
+   .v 的 line-height:34px —— 字小、半行距却巨大（~9px），基线对齐后它的下沿比数字行盒
+   还低 7px，把整行撑高（实测带单位的卡 vH 38–40、不带的 34 → 数字位置差 5px）。
+   收成 line-height:1 后行盒回到 34px，带不带单位都不再影响数字位置。 */
+.tile .v small{font-size:11px;font-weight:500;color:var(--fg3);margin-left:3px;line-height:1}
+/* 时间行三块较宽 → 横向：左列「标签(上)/数值(下)」与其余 6 块**同一套文字位置**（左缘对齐），
+   右列补一条同源推导的次要信息把宽度用掉；不再用 space-between 把标签与数值推到两端留出中缝。 */
+.tile.wide{flex-direction:row;align-items:stretch;justify-content:space-between;gap:16px}
+.tile.wide .wmain{display:flex;flex-direction:column;justify-content:space-between;flex:1 1 auto;min-width:0}
+.tile.wide .wside{display:flex;align-items:flex-end;flex:0 0 auto;
+  font-size:11.5px;color:var(--fg3);white-space:nowrap;padding-bottom:2px}
+.tile.wide .v{font-size:27px}
+/* 主砖：文字位置与其它砖完全一致（标题在左上、底部数字在左下），环图在右侧垂直居中；
+   顶色条不是透明而是「键盘蓝 → 鼠标橙」撞色渐变，一眼说明它同时属于键盘与鼠标两类。 */
+.tile.comp{flex-direction:row;align-items:stretch;justify-content:space-between;gap:26px;
+  --tc:linear-gradient(90deg,var(--kb),var(--ms))}
+.comp-info{display:flex;flex-direction:column;justify-content:space-between;gap:10px;min-width:0}
+.comp-h{font-size:13px;font-weight:800;color:var(--fg);display:flex;flex-direction:column;gap:2px}
+.comp-h span{font-size:11px;font-weight:500;color:var(--fg3)}
+.donuts{display:flex;gap:18px;justify-content:center;align-items:center;flex:0 0 auto;align-self:center}
+.donut-wrap{display:flex;flex-direction:column;align-items:center;gap:7px}
+.donut{width:108px;height:108px;border-radius:50%;position:relative;display:grid;place-items:center;
+  background:conic-gradient(var(--c) calc(var(--p,0)*1%), var(--line-soft) 0)}
+.donut::after{content:"";position:absolute;width:62%;height:62%;border-radius:50%;background:var(--card)}
+.donut .pct{position:relative;z-index:1;font-size:17px;font-weight:800;font-family:Consolas,monospace;color:var(--fg)}
+.dlab{font-size:11.5px;color:var(--fg2);font-weight:600}
+.comp-foot{font-size:11.5px;color:var(--fg3)}
+.comp-foot b{color:var(--fg);font-family:Consolas,monospace;font-weight:700}
+@media (max-width:900px){
+  /* 窄屏放弃「严格 12 列对齐」，改用 auto-fill 砖块自填：每砖天然落到 ~150–200px
+     （内容合适宽度），主砖跨 2×2 仍是视觉锚点；dense 流让砖缝自然填补，
+     形成真正的「铺地砖」观感，而非宽卡拉满。 */
+  .tiles{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+    grid-auto-rows:92px;grid-template-areas:none;grid-auto-flow:row dense}
+  /* 必须显式把普通砖的 grid-area 重置为 auto：grid-template-areas:none 时，
+     内联的 grid-area:var(--a)（kb1/ms1…）引用的是「不存在的命名区域」，
+     Chrome 不会把它当 auto，而是开幻影轨道把砖压成 32px。
+     用非 !important 的 auto 即可解除；因 .tile.comp 特异性更高，其 span 2×2 仍生效。 */
+  /* 窄屏卡高从 88 → 92px：宽砖回退竖排后比普通砖多一行次要信息（11.5px），
+     88px 装不下 → 卡高被撑到 ~92，于是「数值压底」在宽砖上落到更低的 y。
+     把这一档的统一高度提到 92，所有卡（含宽砖）的数字就都落在同一条线上。 */
+  .tile{grid-area:auto;min-height:92px}
+  .tile.comp{grid-column:span 2;grid-row:span 2}
+  .tile .v{font-size:21px}
+  /* 窄屏砖宽只有 ~165px，横向排（标签右配数值）会挤 → 回退成与其它砖一样的竖排。 */
+  .tile.wide{flex-direction:column;align-items:stretch;justify-content:space-between;gap:2px}
+  .tile.wide .wmain{flex:1 1 auto}
+  .tile.wide .wside{display:block;white-space:normal;padding-bottom:0}
+  /* 但**总览的时间行三块**竖排时要另作处理：右列次要信息若留在数值下方，就占掉卡底那一行、
+     把大号数字顶上去 —— 与同屏其它砖差 7px（实测 vTop 31 vs 38）。把它挪到数值**上方**
+     （紧跟标题），数字仍压底；标题/次要信息的行盒同时收住，内容才装得进 88px 的卡高。
+     作用域必须限定在 `.tiles`（那三块是确定竖排的）；写成通用 `.tile.wide` 会波及
+     此刻正横排的 hero(780–900) 与倒计时 —— 它们的 .k/.v 会因 display:contents 并排换行。 */
+  .tiles .tile.wide{justify-content:flex-start;gap:0}
+  .tiles .tile.wide .wmain{display:contents}
+  .tiles .tile.wide .wside{order:1;display:block;white-space:normal;padding-bottom:0;line-height:1}
+  .tiles .tile.wide .v{order:2;margin-top:auto}
+  .donuts{gap:12px;margin:6px 0}
+  .donut{width:96px;height:96px}
+}
+@media (max-width:540px){
+  .tiles{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+  .tile.comp{grid-column:1 / -1;grid-row:span 2}
+  .donuts{gap:14px}
+  .donut{width:96px;height:96px}
+}
+/* 原 `.stat` 卡片实现已删除：倒计时摘要改与总览砖块**共用 `.tile`**（顶色条/角标/标签左上·数值左下），
+   见下方 [倒计时] 段的 `.cd-sum .tile` —— 同一套卡片语言只留一份实现，避免两处各自漂移。 */
+
+/* 7x24 周视图 */
+/* 导航按钮必须**分列两端**：← 上一周在行首、下一周 → 在行尾，日期标签紧随「上一周」。
+   原先两个按钮紧挨在一起（`[上一周][下一周] 日期 …`），方向相反的两个动作挤成一团，
+   与同页「小时分布」卡片的 `[前一天] 标题 … [后一天]` 也不一致 —— 用户会找不到"下一周"。
+   颜色说明属于**图例**的注解（讲的是色阶含义），已移到图例行左端，别再塞回导航行。 */
+.week-nav{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.week-nav .lbl{font-size:12.5px;color:var(--fg2);font-family:Consolas,monospace}
+.week-nav .spacer{margin-left:auto}
+.heat7-wrap{overflow-x:auto;padding-bottom:4px}
+.heat7{display:grid;grid-template-columns:40px repeat(24,1fr);grid-auto-rows:20px;gap:3px;align-items:center}
+.heat7 .wl{font-size:11.5px;color:var(--fg3);text-align:right;padding-right:6px;font-family:Consolas,monospace}
+.heat7 .wl.av{color:var(--accent);font-weight:700}
+.heat7 .wh{font-size:10.5px;color:var(--fg3);text-align:center;font-family:Consolas,monospace}
+/* 可交互暗示必须与真实可交互一致：**只有「有数据的格子」才配 hover 反馈**。
+   带 data-tip 才是"有内容可看"，活动日历里还额外带 data-k 才是"能点"。
+   没有数据的日期、以及跨月占位格（blank）长得一模一样，但点了毫无反应 ——
+   给它们橙框+放大，用户就会以为「这个日期也能选中」（实测改前：日历 300 个
+   无数据格 + 29 个占位格、周视图 144 个空占位格都会亮出橙框）。 */
+.heat7 .hc{height:20px;border-radius:3px;background:var(--line-soft);cursor:default;transition:.12s}
+/* cursor 语义：真能点 -> pointer；只能看 tooltip -> help；两样都没有 -> default。
+   周视图的格子不可点（只提供悬停信息），所以是 help 而不是 pointer。 */
+.heat7 .hc[data-tip]{cursor:help}
+.heat7 .hc.hc-off{background:var(--line-soft);box-shadow:inset 0 0 0 1px var(--line);pointer-events:none}
+.heat7 .hc[data-tip]:hover{outline:2px solid var(--accent);outline-offset:1px;transform:scale(1.14);z-index:2}
+
+/* 全年日历（按月分块，块间留间隔）
+   注意 margin-inline:auto：本块宽度由「月数 × 月块宽 + 间隔」决定（width:max-content），
+   装不下的更旧月份会被 fitCalendar 隐藏，于是总宽往往窄于卡片内容区。此时若左对齐，
+   多余空间会**全部堆到右侧**（实测左 1px / 右 65px，差 64px），观感是「右边空一大条」。
+   居中后两侧留白相等，且不随月份增减而漂。 */
+.cal-scroll{overflow-x:auto;padding-bottom:6px}
+.year-cal{display:flex;gap:16px;align-items:flex-start;width:max-content;margin-inline:auto}
+/* ⚠ 这里有两个必须一起看的约束（改任何一个都要跑 `_label_ab.py` 复核）：
+   1) `.cal-scroll{overflow-x:auto}` 有个隐藏副作用：按 CSS 规则，**一个轴的计算值不是
+      visible 时，另一轴的 visible 会被计算成 auto** ⇒ 它同时成了一个纵向裁剪盒，
+      裁边正好压在第一个子元素（月份标签）的顶沿。
+   2) `.ym-label` 若写 `line-height:1`（11px），行盒比字体盒（13px，Consolas+CJK 回退，
+      ascent10+descent3）矮 2px、半行距为负，**字形顶部本来就冒出行盒** ⇒ 被上一条裁掉。
+      实测：devicePixelRatio=1 时取整恰好保住那一行（10 行墨迹看不出来），
+      而 dsf=1.25 / 1.5（Windows 125%/150% 缩放）下**少 1 设备行** —— 用户截图正是该环境。
+   现在 line-height 给到 14px（> 字体盒 13px，留 1.5px 余量），并把 gap 由 5 收到 2，
+   让「标签行 + 间距」仍是 16px，总高与改前一致，不牵动下方布局。
+   判据不是"看着像不像被裁"，而是**「把 overflow 去掉后渲染必须逐像素一致」**。 */
+.ym-block{display:flex;flex-direction:column;gap:2px}
+.ym-label{font-size:11px;color:var(--fg3);font-family:Consolas,monospace;line-height:14px}
+.ym-grid{display:grid;grid-template-rows:repeat(7,13px);grid-auto-flow:column;gap:3px}
+.ycell{width:13px;height:13px;border-radius:3px;background:var(--line-soft);cursor:default;transition:.12s}
+/* 同 heat7：pointer 只留给「真能点」的格子（活动日历有数据的那些），
+   倒计时日历的格子只能看 tooltip -> help */
+.ycell[data-tip]{cursor:help}
+.ycell[data-k]{cursor:pointer}
+.ycell[data-tip]:hover{outline:2px solid var(--accent);outline-offset:1px;transform:scale(1.18);z-index:2}
+.ycell.blank{background:transparent;pointer-events:none}
+
+/* 面板标题行：标题居左、注释贴本行右缘。
+   注释是「标题行的右手注脚」——本行右缘经探针实测 flushR = 0，正是**下方图表内容右缘**，
+   故右对齐后注释落在那条竖线上，与「注脚跟内容、不跟容器」的既有判据同源；
+   留在标题右边（左对齐）会让短标题行右侧空掉 500+px（实测 632 / 522px）。 */
+.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.row .title{font-size:14px;font-weight:700;font-family:Consolas,monospace}
+.row .meta{font-size:12px;color:var(--fg3);margin-left:auto}
+.spacer{margin-left:auto}
+/* 小时分布的日期信息块：**日期一行、灰色统计一行**，整块在行内**水平居中**。
+   用三列 `minmax(0,1fr) auto minmax(0,1fr)`：两侧轨道等宽（同为 0~1fr，最小值都取 0），
+   中间 auto 轨道因此恒在容器正中，左右按钮各自贴自己轨道的两端。
+   ⚠ 别写成 `1fr auto 1fr` / `auto 1fr auto`：前者的 1fr 轨道最小值是**内容宽**，
+   两个按钮宽度不等（禁用态 / 文案长短）时两侧轨道就不等，中间块会被推偏；
+   后者中间轨道跟内容走，两侧空档不对称。实测这两种写法都出现过 5~20px 的偏移。
+   ⚠ 也别写成 `[按钮][块 flex:1 + justify-content:center][按钮]`：那样居中的是
+   "剩余空间的中点"，不是容器中点，按钮一宽就偏。 */
+.day-nav{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
+  align-items:center;gap:10px;margin-bottom:14px}
+/* ⚠ 两个按钮必须显式 justify-self:start/end：grid item 默认 justify-self:stretch，
+   会被拉成整条轨道那么宽（实测 298px！），按钮从"小药丸"变成"长条"。
+   写了 start/end 之后宽度回到内容宽（65.5px），此时这条导航才同时满足
+   "按钮在两端" + "中间块在正中"。
+   ⚠ 再加 white-space:nowrap：否则窄屏时中间轨道撑开、两侧轨道被压到 52px，
+   「前一天」会在按钮里**折成两行**；而且折行后按钮的 min-content 变小，
+   fitDayMeta 量到的"按钮宽"也跟着变小 → 可用宽度算大了 → 裁得不够 → 继续被压。
+   nowrap 让 min-content = 整条文案宽，按钮宁可溢出轨道（由裁剪保证不溢出）也不折。 */
+.day-nav>button{white-space:nowrap}
+.day-nav>button:first-child{justify-self:start}
+.day-nav>button:last-child{justify-self:end}
+.day-info{display:flex;flex-direction:column;align-items:center;gap:1px;min-width:0}
+.day-info .day-title{display:flex;align-items:center;justify-content:center;flex-wrap:nowrap;
+  font-size:14px;font-weight:700;font-family:Consolas,ui-monospace,monospace;line-height:20px}
+/* 统计行（灰色）。整段 nowrap，宽度不足时由 fitDayInfo 按 data-p 优先级**逐段裁掉**。
+   行高给显式 17px：12px 字体的字体盒 ≈14.2px，17px 不会切字形；显式值是避免继承
+   全局 1.6（=19.2px）把行盒撑高 —— 本卡片纵向已经压过一次（见 .legend 那条）。
+   ⚠ 这里**不靠 overflow:hidden 兜底**：flex item 的宽度就是内容宽，块盒永远
+   等于内容宽，overflow 根本不会触发，写了是障眼法。真正的不溢出靠裁剪 + 探针断言。 */
+.day-info .day-meta{display:flex;align-items:center;justify-content:center;flex-wrap:nowrap;
+  font-size:12px;color:var(--fg3);line-height:17px}
+/* 段（seg）= 可被逐段裁掉的最小单位：日期行里是「日期」「星期」，统计行里是每一项。
+   两行共用同一条优先级梯子，所以样式也共用一份，别只改一行。 */
+.day-info .seg{display:flex;align-items:center;white-space:nowrap;flex:0 0 auto}
+/* 分隔点只用在统计行**内部**；日期与星期之间是留白（7px），不是「·」。
+   点用伪元素而非文字节点：段被 display:none 时它前面的点一起消失，
+   不会在行首留下孤零零的「·」。JS 会给统计行**第一个可见段**加 .lead 去掉它的点。 */
+.day-info .day-meta .seg:not(.lead)::before{content:"·";margin:0 6px;opacity:.55}
+.day-info .day-title .seg+.seg{margin-left:7px}
+/* 兜底档：连「日期」都装不下时（超窄屏），JS 用实测宽度加 .tight 收一级字号，
+   而不是让字压到按钮上。用实测而不是媒体查询 —— 卡片宽度≠视口宽度。 */
+.day-info.tight .day-title{font-size:12px}
+.day-info.tight .day-meta{font-size:11px}
+.bars{display:grid;grid-template-columns:repeat(24,1fr);gap:5px;align-items:end;height:170px}
+.bar{position:relative;overflow:hidden;border-radius:5px 5px 3px 3px;background:var(--accent-2);min-height:2px;cursor:default;transition:.15s}
+.bar:hover{opacity:.8}
+.bar.off{background:var(--line-soft)}
+.bar-m{position:absolute;left:0;right:0;bottom:0;background:var(--mouse);opacity:.95}
+.bar.off .bar-m{display:none}
+.bar-x{display:grid;grid-template-columns:repeat(24,1fr);gap:5px;margin-top:8px}
+.bar-x div{text-align:center;font-size:10.5px;color:var(--fg3);font-family:Consolas,monospace}
+.bar-x div.hide{visibility:hidden}
+.note{font-size:12px;color:var(--fg3);margin-top:18px;line-height:1.8}
+
+/* 倒计时 */
+.cd-types{display:flex;flex-direction:column;gap:11px;margin-top:6px}
+.cd-type{display:grid;grid-template-columns:74px 1fr 100px;align-items:center;gap:11px;font-size:12.5px}
+.cd-type .lab{color:var(--fg2)}
+.cd-type .bar-bg{height:13px;background:var(--line-soft);border-radius:7px;overflow:hidden}
+.cd-type .bar-fg{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-2));border-radius:7px}
+.cd-type .num{text-align:right;color:var(--fg3);font-family:Consolas,monospace}
+/* 倒计时摘要：四列统计卡，改与总览砖块**共用 `.tile`**（顶色条=族色 --cd / 右上角标「倒计时」
+   / 标签左上 · 数值左下）；卡宽 254px 而内容仅 ~90px，故走 .wide：左列标签+数值、右列同源次要信息。 */
+.cd-sum{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.cd-sum .tile{padding:var(--padT) 15px 15px}
+.cd-sum .tile.wide .v{font-size:21px}
+.cd-sum .tile .v.txt{font-size:16px;font-family:inherit;letter-spacing:0}
+/* 这组的卡在窄屏也 ≥270px（820→2 列、480→1 列），横排（左列标签+数值 / 右列次要信息）完全放得下，
+   故**不跟随** ≤900 那条「.tile.wide 一律退回竖排」的兜底 —— 否则 272px 的卡右侧又空 171px。
+   选择器比媒体查询里的 `.tile.wide` 更具体（0,3,0 > 0,2,0），无需 !important 即可在各档生效。 */
+.cd-sum .tile.wide{flex-direction:row;align-items:stretch}
+.cd-sum .tile.wide .wmain{flex:1 1 auto}
+.cd-sum .tile.wide .wside{display:flex;white-space:nowrap;padding-bottom:2px}
+@media (max-width:820px){.cd-sum{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:480px){.cd-sum{grid-template-columns:1fr}}
+.empty{text-align:center;color:var(--fg3);padding:44px 0;font-size:13px}
+#gtip{position:fixed;pointer-events:none;background:var(--fg);color:var(--bg);font-size:11.5px;
+  padding:5px 9px;border-radius:7px;white-space:nowrap;opacity:0;transition:opacity .1s;z-index:99;font-family:Consolas,monospace}
+@media (max-width:560px){.hero-stats{grid-template-columns:1fr}}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hc:focus-visible,.ycell:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap hdr">
+    <h1>键盘热度报告</h1>
+    <span class="range" id="hdr-range"></span>
+    <div class="actions">
+      <button id="btn-copy">复制摘要</button>
+      <button id="btn-csv">导出 CSV</button>
+      <button id="btn-theme" class="primary">切换深色</button>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <section style="margin-top:28px">
+    <div class="hero" id="hero">
+      <span class="tag"><span class="dot"></span><span id="persona">分析中…</span></span>
+      <h3 id="hero-title">你的键盘画像</h3>
+      <p id="hero-desc"></p>
+      <div class="hero-stats" id="hero-stats"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>总览 <span>铺地砖式排布：位置即信息，大小即分量</span></h2>
+    <div class="tiles" id="stats"></div>
+  </section>
+
+  <section>
+    <h2>键盘鼠标活动功能的统计 <span>同一位置切换：日历看全年密度、周×小时热力图看逐小时活跃、当天看逐小时分布；点有数据的日期查看当天</span></h2>
+    <div class="panel">
+      <div class="view-tabs" id="view-tabs">
+        <button class="tab active" data-view="cal">日历</button>
+        <button class="tab" data-view="heat">周×小时</button>
+        <button class="tab" data-view="day">当天</button>
+      </div>
+      <div class="view-pane" data-pane="cal">
+        <div class="cal-scroll">
+          <div class="year-cal" id="year-cal"></div>
+        </div>
+        <div class="legend"><span>低</span>
+          <i style="background:hsl(18,39%,86%)"></i><i style="background:hsl(18,51%,75%)"></i>
+          <i style="background:hsl(18,63%,64%)"></i><i style="background:hsl(18,74%,54%)"></i>
+          <i style="background:hsl(18,85%,44%)"></i><span>高</span>
+          <span style="margin-left:10px">无数据</span><i style="background:var(--line-soft)"></i></div>
+      </div>
+      <div class="view-pane" data-pane="heat" hidden>
+        <div class="week-nav">
+          <button id="week-prev" class="ghost">← 上一周</button>
+          <span class="lbl" id="week-label"></span>
+          <span class="spacer"></span>
+          <button id="week-next" class="ghost">下一周 →</button>
+        </div>
+        <div class="heat7-wrap"><div class="heat7" id="heat7"></div></div>
+        <div class="legend"><span>颜色越深 = 综合活跃越高（键盘 + 鼠标折算）</span>
+          <span class="spacer"></span><span>低</span>
+          <i style="background:hsl(18,39%,86%)"></i><i style="background:hsl(18,51%,75%)"></i>
+          <i style="background:hsl(18,63%,64%)"></i><i style="background:hsl(18,74%,54%)"></i>
+          <i style="background:hsl(18,85%,44%)"></i><span>高</span></div>
+      </div>
+      <div class="view-pane" data-pane="day" hidden>
+        <div class="day-nav" id="day-nav">
+          <button id="day-prev">前一天</button>
+          <div class="day-info" id="day-info">
+            <span class="day-title" id="day-title">--</span>
+            <span class="day-meta" id="day-meta"></span>
+          </div>
+          <button id="day-next">后一天</button>
+        </div>
+        <div class="bars" id="bars"></div>
+        <div class="bar-x" id="bar-x"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="countdown">
+    <h2>倒计时功能的统计 <span>每天使用次数，按 5 / 10 / 25 分钟三种类型分别计数</span></h2>
+    <div class="stats" id="cd-stats"></div>
+    <div class="panel" style="margin-top:14px">
+      <div class="row"><span class="title">按类型分布</span>
+        <span class="meta">三种时长各自被启动的次数（百分比 = 占全部倒计时）</span></div>
+      <div id="cd-types"></div>
+    </div>
+    <div class="panel" style="margin-top:14px">
+      <div class="row"><span class="title">每日使用次数</span>
+        <span class="meta">日历热力图形式；颜色越深 = 当天启动次数越多，悬停看类型 / 来源拆分</span></div>
+      <div class="cal-scroll">
+        <div class="year-cal" id="cd-cal"></div>
+      </div>
+    </div>
+  </section>
+
+  <p class="note">
+    数据说明：本报告只包含「每分钟击键数 / 退格数 / 活跃秒数 / 鼠标移动次数 / 点击次数 / 滚轮格数」
+    六类聚合计数，不含任何按键内容、窗口标题、进程信息。<br>
+    鼠标折算系数：移动 ×0.01、点击 ×4、滚轮 ×2（一格），与悬浮窗同口径。
+  </p>
+</div>
+<div id="gtip"></div>
+
+<script>
+const DATA = {"2026-09-22":[[785,35,0,17,0,0,0],[787,5,0,4,0,0,0],[788,19,0,5,0,0,0],[805,131,76,26,0,0,0],[806,113,19,23,0,0,0],[814,28,4,5,0,0,0],[815,22,9,18,0,0,0],[819,4,0,2,0,0,0],[820,41,6,27,0,0,0],[822,3,0,3,0,0,0],[823,3,0,3,0,0,0],[824,2,1,0,0,0,0],[825,47,0,4,0,0,0],[826,10,0,2,0,0,0],[827,77,9,27,0,0,0],[828,73,12,26,0,0,0],[829,67,10,29,0,0,0],[830,3,0,3,0,0,0],[890,44,7,17,618,1,0],[891,115,7,55,1506,4,5],[892,47,3,30,1388,3,4],[893,222,25,50,526,2,16],[894,137,15,53,971,2,44],[895,57,0,60,2915,10,69],[896,108,1,50,976,3,68],[897,120,26,38,530,1,22],[898,146,12,56,721,2,13],[899,139,7,62,2013,4,18],[900,146,8,57,2053,12,0],[901,159,13,60,1742,5,6],[902,63,8,51,2514,9,0],[903,36,0,49,2509,5,14],[904,96,13,58,2261,2,24],[905,150,11,59,1375,3,13],[906,240,22,56,318,1,29],[907,102,2,55,2050,2,44],[908,127,4,59,1224,3,13],[909,0,0,38,2155,1,7],[910,70,5,53,2606,5,8],[911,48,2,56,2720,9,30],[912,120,4,57,1690,4,30],[913,240,15,50,0,0,0],[914,178,19,58,0,0,0],[915,116,4,60,2411,7,40],[916,277,19,60,3,0,0],[917,157,26,55,881,2,5],[918,99,9,44,755,2,48],[919,220,11,56,1081,2,1],[920,139,13,57,1370,3,45],[921,1,0,16,1172,4,0],[923,0,0,32,2563,5,19],[924,0,0,50,2875,6,30],[925,104,6,57,1635,3,21],[926,69,4,49,2196,13,21],[927,71,3,57,2394,11,9],[928,61,3,56,2880,19,47],[929,59,9,59,3186,20,0],[930,0,0,44,3142,20,12],[931,7,0,54,3433,20,3],[932,3,0,53,3384,15,26],[933,217,198,46,1330,7,6],[934,62,95,47,2293,16,0],[935,179,11,56,1440,5,0],[936,40,47,58,3125,16,0],[937,77,8,57,1932,11,71],[938,0,0,48,2808,9,27],[942,1,0,46,3440,12,5],[943,169,11,46,215,2,0],[944,19,5,54,1935,4,94],[945,2,0,56,3697,17,5],[946,2,3,59,3780,13,7],[947,122,6,59,1989,8,7],[948,79,0,52,2435,8,0],[949,143,7,47,1297,2,5],[950,0,0,42,2686,5,0],[951,142,7,55,1784,4,6],[952,0,0,46,1571,6,26],[953,0,0,50,3265,14,9],[954,288,20,57,4,0,0],[955,55,1,57,3860,28,8],[956,0,0,60,5035,31,11],[957,0,0,52,1549,1,7],[958,191,9,59,1219,3,0],[959,0,0,52,2419,10,2],[960,0,0,50,2312,12,0],[961,1,0,52,2214,8,4],[962,135,4,52,1020,2,10],[963,0,0,50,3226,15,4],[964,1,0,44,2135,6,1],[965,0,0,38,1543,7,14],[967,145,5,52,1045,3,10],[968,141,7,54,1065,1,1],[969,15,1,7,0,0,0],[970,27,0,28,1286,4,4],[971,3,0,8,303,1,2],[972,147,13,49,469,3,0],[973,223,6,51,0,0,0],[974,153,9,49,501,1,0],[975,1,0,32,1548,8,4],[976,0,0,22,679,3,7],[977,110,5,27,222,1,0],[978,0,0,32,1215,4,8],[979,31,0,5,0,0,0],[980,191,2,49,715,5,0],[981,1,0,16,703,3,0],[982,61,0,48,2041,8,4],[983,270,13,56,109,0,0],[984,95,4,59,2025,11,4],[985,26,3,59,3245,18,2],[986,0,0,18,959,4,0],[988,1,0,24,2096,7,0],[989,0,0,9,693,6,0],[1172,103,9,26,486,1,0],[1173,223,26,54,0,0,0],[1174,33,3,42,1264,3,40],[1175,23,0,52,3017,22,22],[1176,52,9,39,1211,12,0],[1177,11,0,60,3937,36,21],[1178,136,44,51,519,2,0],[1179,118,0,17,0,0,0],[1181,1,0,4,161,0,0],[1182,72,10,48,1789,12,0],[1183,18,0,31,2254,17,0],[1184,71,8,54,1678,8,48],[1185,81,3,48,986,3,2],[1186,94,2,47,2069,7,23],[1187,0,0,36,2354,6,29],[1188,29,3,45,1701,9,16],[1189,97,77,44,2207,13,8],[1190,86,10,55,2349,22,4],[1191,221,11,59,1007,4,0],[1192,272,0,33,1112,9,3],[1193,26,0,51,3453,15,32],[1194,22,0,46,2408,10,12],[1195,52,0,53,1976,16,0],[1196,33,0,51,3027,12,3],[1197,60,3,58,3281,23,13],[1198,3,0,58,5208,30,26],[1199,0,0,54,3593,23,28],[1200,207,105,48,419,2,0],[1201,131,24,53,1221,7,0],[1202,0,0,50,2147,29,0],[1203,22,0,41,1256,13,16],[1204,69,43,42,1677,8,30],[1205,11,6,53,2815,17,27],[1206,71,0,53,2132,16,14],[1207,98,9,56,1320,10,10],[1208,75,2,23,306,2,0],[1209,10,0,53,3408,23,9],[1210,27,10,33,1837,10,8],[1211,68,4,61,3363,20,13],[1212,149,3,59,1972,11,9],[1213,64,5,60,2654,10,3],[1214,70,8,55,2050,10,2],[1215,107,22,42,903,5,1],[1216,240,15,60,743,3,1],[1217,86,0,55,2317,15,14],[1218,50,9,59,3061,21,9],[1219,61,49,43,446,3,7],[1220,69,2,42,1107,3,27],[1221,76,13,40,312,3,8],[1222,103,25,48,598,7,0],[1223,120,0,45,1519,12,11],[1224,30,9,57,3583,15,0],[1225,49,14,59,2256,15,0],[1226,1,0,46,3123,20,5],[1227,18,1,60,4067,17,27],[1228,54,11,46,2237,10,2],[1229,57,6,52,1851,12,9],[1230,33,0,59,2485,17,2],[1231,64,5,52,1466,8,0],[1232,23,5,42,2921,11,7],[1233,12,0,60,4274,37,13],[1234,94,3,58,1686,16,3],[1235,27,3,60,3775,23,4],[1236,101,22,57,534,4,0],[1237,19,1,60,3445,20,50],[1238,152,49,57,0,0,0],[1239,54,1,56,3409,24,0],[1240,79,12,60,2804,17,5],[1241,109,11,56,1852,12,9],[1242,115,3,56,2288,11,0],[1243,30,2,61,3559,33,0],[1244,120,9,57,1849,14,8],[1245,82,45,52,2667,15,4],[1246,23,0,60,4048,16,9],[1247,72,1,47,2396,17,2],[1248,61,12,50,2346,12,0],[1249,147,16,41,272,2,0],[1250,42,7,49,1308,5,34],[1251,79,17,37,47,0,0],[1252,97,10,27,0,0,0],[1253,141,6,57,771,2,4],[1254,12,0,34,2199,17,21],[1255,48,0,37,1241,5,12],[1256,6,3,25,1589,7,68]],"2026-09-23":[[524,1,0,0,0,0,0],[525,31,5,43,2442,11,0],[526,102,7,40,910,6,0],[527,88,13,21,29,0,0],[528,45,0,11,0,0,0],[529,9,2,58,4128,28,18],[530,79,6,35,879,4,0],[531,12,5,62,3562,22,44],[532,102,7,32,1042,2,10],[533,1,0,26,1858,9,0],[534,61,1,29,892,6,16],[535,123,19,57,1357,8,25],[536,88,2,37,1283,5,2],[537,1,0,9,454,2,1],[538,0,0,38,2513,19,0],[539,0,0,54,3728,20,15],[540,0,0,48,2942,6,6],[541,0,0,60,3501,22,89],[542,0,0,22,926,2,39],[544,0,0,58,4688,8,10],[545,21,0,48,3291,9,6],[546,96,11,47,1938,7,0],[547,109,8,31,443,3,10],[548,219,9,58,1418,5,6],[549,170,20,58,1213,7,0],[550,82,4,39,930,4,0],[551,90,67,46,930,2,6],[552,214,0,40,319,0,8],[553,106,3,57,2151,9,42],[554,343,45,60,196,1,0],[555,140,17,60,2224,7,22],[556,180,21,58,406,3,2],[557,97,4,27,0,0,0],[558,21,0,6,0,0,0],[559,306,8,55,0,0,0],[560,125,15,38,766,2,0],[561,180,12,41,197,2,0],[562,25,1,26,999,6,0],[563,93,6,50,0,0,0],[564,150,9,47,0,0,0],[565,6,0,45,2228,7,5],[566,10,0,56,1404,2,50],[567,220,17,58,190,1,0],[568,5,11,49,3084,8,67],[569,34,3,42,1231,2,21],[570,191,15,56,774,2,3],[571,80,10,52,1817,4,13],[572,123,7,45,935,0,14],[573,78,7,30,1109,5,0],[574,236,22,56,0,0,0],[575,188,7,40,0,0,0],[576,27,6,40,2372,10,15],[577,0,0,60,4472,30,9],[578,30,9,54,3237,10,4],[579,19,0,36,2003,7,20],[580,23,5,42,1205,7,17],[581,222,42,34,0,0,0],[582,229,40,47,0,0,0],[583,161,9,39,110,0,0],[586,179,18,36,336,2,0],[587,61,20,51,2279,12,41],[588,59,9,50,1762,8,12],[589,131,21,51,199,2,0],[590,119,4,50,1201,4,0],[591,8,0,46,2410,14,2],[592,5,0,16,571,4,0],[594,0,0,6,306,0,0],[595,0,0,48,2195,2,0],[596,0,0,2,190,0,0],[597,16,0,43,2314,12,15],[598,13,0,39,3378,12,18],[599,34,5,56,1852,16,13],[600,105,11,35,120,2,0],[601,125,2,35,0,0,0],[602,101,21,29,259,1,0],[603,144,4,52,646,6,0],[604,100,51,49,0,0,0],[605,379,7,54,305,5,0],[606,164,8,33,661,5,0],[607,435,17,50,179,2,0],[608,352,12,54,120,1,0],[609,512,14,51,0,0,0],[610,107,21,46,843,3,0],[611,7,0,56,3993,22,0],[612,77,5,43,1845,6,0],[613,111,8,57,1329,9,0],[614,38,0,54,2389,10,23],[615,0,0,54,3691,10,45],[616,109,6,59,2419,14,0],[617,14,4,60,4240,19,0],[618,235,26,60,37,1,0],[619,78,28,45,1204,11,0],[620,332,10,56,816,4,0],[621,173,9,52,1645,12,0],[622,0,0,36,1321,2,7],[623,93,10,60,1659,5,2],[624,49,10,40,1746,5,11],[625,0,0,22,1216,5,21],[627,0,0,26,2472,6,14],[628,0,0,8,648,0,0],[629,15,0,16,1272,5,3],[630,233,10,60,757,2,10],[631,23,0,7,0,0,0],[636,1,0,14,730,1,2],[637,141,13,56,448,3,0],[638,69,20,39,862,4,0],[639,185,13,58,930,3,0],[640,0,0,40,2452,8,11],[656,60,56,33,1302,8,0],[657,280,9,60,0,0,0],[658,166,10,57,1438,9,7],[659,222,17,57,0,0,0],[660,89,24,48,1045,5,2],[661,256,17,51,0,0,0],[662,251,3,56,473,2,3],[663,67,1,60,1934,9,76],[664,108,8,53,1451,12,2],[665,0,0,50,1499,6,38],[666,24,0,34,1359,4,9],[667,97,7,52,1558,3,31],[668,237,32,54,392,3,12],[669,159,11,51,1080,4,0],[670,60,24,60,3015,16,15],[671,32,0,34,710,9,20],[672,45,2,48,806,12,0],[673,222,4,48,0,0,0],[674,212,22,47,384,2,0],[675,112,0,23,263,0,0],[676,134,27,56,1874,15,12],[677,121,16,55,688,5,0],[678,132,4,52,1292,4,20],[679,169,58,49,1133,5,10],[680,87,7,52,1843,6,16],[681,0,0,56,2741,8,0],[682,124,1,60,1590,7,9],[683,14,4,22,942,2,3],[692,1,0,0,0,1,0],[693,45,34,41,1474,6,0],[694,30,4,60,3117,9,13],[695,29,0,39,1840,7,2],[696,13,0,52,2784,11,0],[697,58,3,40,2542,8,17],[698,0,0,15,878,3,0],[699,0,0,50,3324,10,4],[700,41,12,57,2770,17,20],[701,91,8,57,1756,14,0],[702,81,17,51,1621,3,13],[703,2,6,35,1890,5,2],[704,139,1,49,1019,4,8],[705,0,0,30,2381,12,15],[713,32,12,39,2089,12,0],[714,202,23,59,751,2,6],[715,106,7,45,958,5,6],[716,1,0,13,509,1,0],[756,1,0,29,2433,10,15],[757,147,32,51,39,0,0],[758,331,247,59,0,0,0],[759,94,12,40,1720,9,0],[760,142,11,52,754,2,0],[761,183,17,60,0,0,0],[762,148,10,60,0,0,0],[763,160,17,52,0,0,0],[764,55,4,13,0,0,0],[765,164,2,46,0,0,0],[766,93,9,31,132,0,1],[767,142,6,50,0,0,0],[768,98,6,38,0,0,0],[769,117,9,57,1164,6,9],[770,37,0,46,2554,12,0],[771,0,0,50,3874,12,5],[772,53,1,47,2284,11,70],[773,66,2,28,1122,4,18],[774,0,0,8,621,1,0],[778,0,0,2,107,0,8],[779,90,4,47,731,2,50],[780,9,0,8,318,1,7],[781,20,0,18,540,2,36],[782,61,1,23,283,1,4],[811,1,0,18,1388,6,0],[812,93,21,38,1202,6,10],[813,275,91,60,0,0,0],[814,65,4,37,1253,9,0],[815,0,0,8,682,3,2],[816,194,5,57,612,2,5],[817,268,18,58,667,4,6],[818,98,8,52,1099,3,29],[819,111,2,43,1184,5,0],[831,178,120,53,978,2,8],[832,183,12,55,679,2,12],[833,47,3,52,2229,2,29],[834,0,0,0,67,0,0],[835,0,0,60,2611,3,35],[836,0,0,44,1735,1,8],[837,122,1,34,654,2,5],[838,321,15,61,0,0,0],[839,259,9,55,646,2,0],[840,0,0,48,2897,7,6],[841,0,0,48,1400,2,34],[842,115,7,54,2524,5,39],[843,104,14,51,1659,6,8],[844,99,0,48,1811,7,0],[845,338,12,59,0,0,0],[846,2,0,8,263,1,0],[853,1,0,36,2142,7,49],[854,68,19,51,1222,2,4],[855,27,14,46,1087,1,91],[856,142,8,50,2142,13,0],[857,313,21,60,0,0,0],[858,136,13,55,1486,3,12],[859,123,17,45,723,1,2],[860,194,1,45,0,0,0],[861,204,9,54,421,1,7],[862,210,13,56,138,0,3],[863,20,4,45,2619,12,4],[864,35,37,54,2592,14,12],[865,10,0,49,1715,6,60],[866,147,3,57,2229,15,13],[867,128,4,43,789,1,3],[868,0,0,36,1581,0,15],[869,178,17,49,434,3,11],[870,51,6,54,1876,10,4],[871,0,0,54,2515,11,119],[872,4,0,38,2481,12,0],[873,236,22,60,535,3,0],[874,166,7,47,539,1,0],[875,0,0,43,2689,20,15],[876,106,7,58,1602,7,10],[877,0,0,48,2533,6,24],[878,20,3,61,3818,27,5],[879,4,1,58,3953,18,81],[880,101,6,60,2376,15,10],[881,1,0,44,1994,8,0],[882,73,0,56,2279,4,19],[883,121,10,59,1937,8,11],[884,223,23,56,0,0,0],[885,205,29,56,198,2,0],[886,256,18,60,0,0,0],[887,63,5,17,0,0,0],[888,112,15,49,1905,5,18],[889,75,53,55,2095,11,2],[890,0,0,56,2628,11,13],[891,101,3,53,1224,4,4],[892,73,1,59,2897,10,4],[893,0,0,32,973,3,8],[894,119,5,32,0,0,0],[895,213,20,53,461,2,6],[896,0,0,48,1914,6,5],[897,0,0,24,643,1,2],[898,99,25,31,0,0,0],[899,169,14,60,1065,8,0],[900,97,7,45,697,2,0],[901,0,0,14,533,3,0],[902,0,0,50,2572,16,12],[903,19,2,53,2558,18,0],[904,42,17,60,1805,8,3],[905,95,6,47,829,5,3],[906,64,1,50,1074,7,0],[907,151,3,40,317,0,0],[908,14,0,48,1514,5,25],[909,89,2,35,530,2,0],[910,39,3,25,489,5,1],[911,37,4,52,2349,12,15],[912,54,18,50,1662,4,2],[913,55,2,45,2469,16,0],[914,187,5,55,884,5,0],[915,122,12,43,504,3,0],[916,5,0,38,1776,8,4],[917,100,1,49,1754,11,0],[918,218,19,61,108,1,0],[919,98,1,33,363,2,1],[920,42,0,30,1045,1,1],[921,136,25,53,887,5,1],[922,7,0,54,2788,14,68],[923,44,2,41,945,3,42],[924,115,7,50,1432,2,34],[925,148,3,60,1210,2,146],[926,138,2,53,1124,4,34],[927,145,2,52,978,5,0],[928,0,0,36,1363,14,5],[929,183,26,45,0,0,0],[930,106,6,48,332,2,5],[932,16,5,53,2597,11,15],[933,0,0,56,3222,8,19],[934,132,10,55,1020,6,0],[935,64,7,52,1454,5,24],[936,4,0,54,3011,9,37],[937,103,11,58,1551,13,2],[938,120,11,47,334,4,0],[939,99,76,50,265,2,0],[940,82,36,59,1632,9,12],[941,45,11,38,1183,8,0],[942,85,1,41,1429,7,4],[943,124,1,54,1763,13,0],[944,0,0,60,3842,17,0],[945,25,2,60,2847,12,46],[946,0,0,60,2378,16,144],[947,107,9,50,1238,3,3],[948,20,0,6,78,1,0],[949,110,4,54,1418,4,44],[950,11,1,50,3505,14,23],[951,0,0,52,4470,13,3],[952,25,0,61,2750,18,76],[953,27,1,43,1678,2,59],[954,112,2,56,1684,7,6],[955,0,0,59,4108,20,15],[956,0,0,60,2854,2,39],[957,123,14,56,948,2,19],[958,65,0,43,1925,9,15],[959,0,0,26,1033,0,6],[960,133,9,59,1355,2,0],[961,36,5,14,425,2,0],[965,0,0,40,1699,4,19],[966,23,13,15,409,3,0],[967,46,14,47,1569,11,15],[968,10,5,50,1646,4,68],[969,96,20,60,532,2,18],[970,152,4,45,0,1,0],[971,165,1,59,314,2,0],[972,90,0,35,952,8,0],[973,67,12,22,0,0,0],[975,9,0,30,1582,8,2],[976,234,8,54,0,0,0],[977,48,4,18,0,0,0],[978,31,0,16,146,1,0],[979,157,17,47,360,2,0],[980,117,62,46,0,0,0],[981,193,19,51,545,4,0],[982,65,0,49,2110,8,0],[983,180,9,34,219,3,0],[984,32,9,19,422,2,0],[985,55,2,20,0,0,0],[986,86,16,32,0,0,0],[987,80,0,32,1323,5,0],[988,37,12,52,1699,3,21],[989,125,3,39,708,4,0],[990,1,0,42,2796,12,4],[991,72,16,61,2021,12,1],[992,60,4,29,1304,4,0],[993,0,0,56,2998,24,14],[994,83,4,56,2362,15,9],[995,58,5,60,2721,16,5],[996,192,13,55,42,0,0],[997,221,25,53,0,0,0],[998,215,0,47,303,1,0],[999,27,4,28,1100,6,0],[1000,54,0,46,2731,14,0],[1001,59,0,48,1741,7,9],[1002,131,16,54,841,3,0],[1003,337,17,56,0,0,0],[1004,108,7,54,1379,8,0],[1005,213,13,52,347,1,5],[1006,123,48,57,477,2,0],[1007,161,15,48,118,0,0],[1008,184,17,52,0,0,0],[1009,101,16,49,546,1,39],[1010,211,12,56,28,0,0],[1011,246,5,58,0,0,0],[1012,62,2,44,1806,11,4],[1013,0,0,4,597,2,4],[1014,44,1,46,1433,10,14],[1015,156,22,52,1150,6,0],[1016,0,0,58,4372,28,0],[1017,253,17,61,215,2,0],[1018,164,18,44,563,5,0],[1019,149,10,59,2220,11,0],[1020,163,10,56,1448,7,14],[1021,34,9,29,801,3,22],[1022,34,8,30,824,4,7],[1023,12,0,42,2161,6,57],[1024,229,17,46,0,0,0],[1025,65,7,41,1651,9,5],[1026,31,1,40,1416,4,41],[1028,51,4,44,1355,7,5],[1029,117,10,54,995,8,0],[1030,136,8,49,327,4,0],[1031,138,26,45,27,0,14],[1032,79,9,45,547,6,17],[1033,48,13,50,1746,7,9],[1034,0,0,12,872,4,0],[1035,76,8,58,1451,4,27],[1036,221,1,61,980,8,5],[1037,98,2,53,294,0,7],[1038,387,0,48,789,5,7],[1039,141,0,60,628,2,12],[1040,112,3,59,1355,5,5],[1041,7,0,44,1697,5,23],[1042,568,4,54,195,1,0],[1043,22,1,57,2876,27,90],[1044,71,1,53,2648,36,0],[1045,30,0,60,3458,42,0],[1046,60,2,60,2079,16,33],[1047,1,1,30,1621,4,1],[1050,0,0,12,832,0,0],[1051,93,4,42,1457,7,0],[1052,1,0,1,0,0,0],[1062,17,41,22,744,4,0],[1063,43,9,42,813,4,3],[1064,69,9,52,1147,4,33],[1065,0,0,56,4731,18,39],[1066,0,0,56,3274,11,73],[1067,0,0,38,1942,3,12],[1068,69,6,47,1603,12,10],[1069,84,17,60,2265,11,16],[1070,0,0,51,3701,18,32],[1071,105,11,63,2380,15,0],[1072,69,2,58,3212,24,2],[1073,0,0,48,2912,12,38],[1074,51,8,50,2041,5,37],[1075,89,9,49,1342,6,12],[1076,72,5,50,1473,4,12],[1077,31,5,56,1695,6,17],[1078,114,4,53,1221,4,11],[1079,65,5,60,2983,16,31],[1080,36,0,55,2567,15,66],[1081,46,3,53,2581,19,6],[1082,135,19,57,1517,6,9],[1083,2,0,56,4224,23,50],[1084,27,0,60,3441,17,22],[1085,96,13,59,1951,13,10],[1086,121,1,58,2477,14,0],[1087,89,6,60,2511,15,8],[1088,105,3,46,1810,12,3],[1178,0,0,56,3264,86,0],[1179,0,0,60,4780,34,8],[1180,10,3,60,3914,16,50],[1181,143,26,59,1360,10,32],[1182,146,23,60,1097,9,0],[1183,193,28,59,678,4,0],[1184,281,22,60,428,4,0],[1185,123,15,55,1391,8,8],[1186,133,20,60,377,2,0],[1187,84,7,58,1489,9,123],[1188,166,26,56,0,0,0],[1189,210,18,50,0,0,0],[1190,226,25,59,0,0,0],[1191,200,25,60,0,0,0],[1192,344,30,61,229,2,5],[1193,257,21,54,0,0,0],[1194,43,6,29,1039,3,19]],"2026-09-24":[[554,1,0,12,1007,5,0],[555,23,1,31,1416,12,0],[556,8,0,50,3206,21,0],[557,173,14,50,192,2,0],[558,255,10,55,1439,11,8],[559,193,15,55,597,2,0],[560,176,6,60,0,0,0],[561,163,20,60,0,0,0],[562,72,15,49,707,2,17],[563,37,0,46,2052,9,85],[564,257,3,57,2851,9,30],[565,3,1,36,1767,10,16],[566,11,4,26,925,14,0],[567,93,28,53,1099,6,0],[568,0,0,8,566,5,7],[569,6,0,9,377,2,54],[570,221,15,60,209,3,0],[571,113,16,54,299,1,66],[572,40,4,42,682,2,106],[573,97,4,45,484,6,0],[574,134,5,46,153,1,0],[575,99,11,45,378,1,0],[576,119,9,48,1135,10,0],[577,115,5,37,729,6,0],[578,194,13,56,565,3,0],[579,71,2,47,1384,5,8],[580,0,0,46,1576,1,10],[581,47,0,35,934,2,0],[582,1,0,46,2437,14,20],[583,3,0,60,3001,9,80],[584,0,0,28,499,1,25],[585,0,0,20,1301,8,0],[586,25,0,60,3201,22,21],[587,27,14,58,2550,15,9],[588,0,0,60,3223,21,13],[589,44,0,27,1089,7,3],[590,41,5,43,2380,13,23],[591,63,4,41,1364,5,10],[592,0,0,58,3699,24,0],[593,198,17,59,41,2,0],[594,176,9,51,730,2,5],[595,24,25,33,803,1,1],[596,173,12,50,1557,9,0],[597,0,0,26,2086,9,33],[598,28,0,55,3559,12,62],[599,0,0,50,2238,4,11],[600,0,0,12,283,1,1],[601,16,8,15,645,3,0],[608,2,0,1,148,0,0],[609,0,0,46,2234,7,14],[610,142,15,56,1762,7,7],[611,25,0,60,3213,15,21],[612,184,8,55,820,5,0],[613,60,5,57,2744,10,5],[614,180,22,57,712,2,1],[615,55,0,32,1416,2,4],[616,89,3,33,1139,3,0],[617,157,10,34,0,0,0],[618,7,0,49,2317,8,117],[619,49,3,54,1466,5,283],[620,79,10,56,1418,2,9],[621,149,11,41,640,3,1],[622,138,16,42,614,2,0],[623,0,0,2,85,0,2],[624,56,1,38,1081,4,52],[625,0,0,42,2460,5,64],[626,16,5,56,3876,13,51],[627,154,7,50,633,1,4],[628,0,0,39,1413,4,19],[629,103,22,54,1494,6,8],[630,128,4,61,1938,10,75],[631,173,16,48,178,0,5],[632,139,13,53,753,3,0],[633,0,0,30,1688,2,31],[635,0,0,20,459,0,2],[636,136,10,45,123,1,0],[637,68,11,59,2013,5,4],[638,70,1,56,2883,10,22],[639,137,6,52,613,4,0],[640,58,5,32,674,1,4],[641,225,7,50,0,0,0],[642,136,2,28,0,0,0],[643,60,25,28,0,0,0],[644,153,20,57,0,0,0],[645,113,23,43,0,0,0],[646,155,14,50,0,0,0],[647,147,43,60,0,0,0],[648,186,8,49,0,0,0],[649,164,4,39,0,0,0],[650,174,18,49,0,0,0],[651,200,16,54,0,0,0],[652,207,26,57,0,0,0],[653,140,15,39,0,0,0],[654,176,15,50,0,0,0],[655,128,3,37,54,2,3],[656,97,19,43,540,2,15],[657,79,16,47,1272,8,0],[658,222,9,53,0,0,0],[659,5,2,46,2134,12,15],[660,168,10,56,982,4,1],[661,249,13,59,0,0,0],[662,125,5,54,795,2,3],[663,107,10,48,585,0,1],[664,65,0,51,1177,1,1],[665,132,32,58,474,1,6],[666,153,16,59,1136,5,5],[667,0,0,22,1345,4,0],[668,0,0,4,257,0,0],[669,57,2,54,2001,1,26],[670,85,1,30,782,0,2],[671,87,4,39,755,1,3],[672,136,27,52,0,0,0],[673,124,25,50,942,2,3],[674,164,4,48,1420,5,2],[675,0,0,14,638,1,10],[676,0,0,4,501,2,0],[677,0,0,52,2667,9,13],[678,0,0,2,7,0,0],[679,0,0,44,2265,10,7],[680,0,0,60,3563,14,0],[681,0,0,52,3001,25,0],[682,38,1,29,1043,4,44],[683,4,0,54,3026,8,62],[684,199,15,56,684,2,3],[685,0,0,32,1397,3,5],[686,0,0,60,3712,13,15],[687,1,0,21,896,0,2],[698,1,0,20,1273,3,2],[699,123,14,53,1917,10,11],[700,61,23,52,1992,12,12],[701,114,1,30,758,6,11],[702,82,24,47,0,0,0],[703,124,15,59,0,0,0],[704,152,14,47,207,2,0],[705,130,55,38,0,0,0],[706,169,13,52,0,0,0],[707,244,12,52,0,0,0],[708,127,16,51,0,0,0],[709,0,0,48,2832,17,0],[710,258,7,57,0,0,0],[711,127,4,46,489,1,0],[713,35,2,36,1904,9,9],[714,53,0,36,1017,6,0],[715,44,7,34,1096,4,3],[716,0,2,12,742,2,2],[717,22,2,50,2787,8,22],[718,2,0,30,2001,8,0],[719,10,0,20,1390,12,0],[720,1,0,26,1433,4,9],[747,1,0,6,253,2,0],[809,28,3,12,331,3,0],[810,106,4,48,1634,12,15],[811,0,0,40,2216,12,2],[812,99,4,54,1061,5,29],[813,32,6,46,1708,6,18],[814,93,5,42,436,1,2],[815,0,0,10,682,2,0],[816,0,0,42,2388,7,19],[817,56,3,49,1576,6,45],[818,178,10,60,129,1,0],[819,134,5,41,196,2,0],[820,76,4,36,764,2,14],[821,0,0,60,4243,30,110],[822,0,0,54,3881,10,52],[823,0,0,56,3438,11,121],[824,1,0,47,2107,15,1],[825,78,4,50,1046,4,0],[826,133,10,53,121,0,0],[827,51,3,40,1056,7,15],[828,0,0,40,1521,3,22],[829,43,0,36,1059,5,30],[830,0,0,2,217,0,0],[831,124,9,60,1607,5,11],[832,13,0,61,3966,16,94],[833,40,6,52,3106,5,43],[834,1,1,18,871,5,4],[835,0,0,54,2703,8,11],[836,0,0,51,2031,7,32],[837,108,21,61,2106,9,31],[838,98,7,56,2930,14,6],[839,41,13,54,3109,21,14],[840,62,2,51,2880,15,14],[841,0,0,56,4113,13,76],[846,0,0,30,2214,11,0],[859,32,4,41,1764,13,0],[860,93,5,45,849,8,0],[861,313,16,41,0,0,0],[862,265,0,24,694,2,0],[863,205,13,61,1276,11,0],[864,112,2,37,0,0,0],[865,92,6,55,2621,22,0],[866,0,0,52,1610,27,20],[867,224,12,52,378,3,2],[868,140,7,57,2149,9,27],[869,119,7,51,1050,1,10],[870,83,6,53,1586,6,6],[871,0,0,48,2080,7,35],[872,17,3,54,3632,18,5],[873,230,11,62,1262,12,0],[874,118,2,60,2638,10,0],[875,53,9,52,2063,11,2],[876,0,0,34,1510,7,9],[877,0,0,20,792,2,27],[878,16,3,44,1468,2,12],[879,298,0,53,1449,5,17],[880,81,7,56,2436,12,5],[881,78,25,26,272,3,0],[882,0,0,30,1141,5,0],[883,60,5,24,520,1,4],[884,167,7,53,1132,4,20],[885,152,22,54,1259,6,1],[886,0,0,56,4065,20,0],[887,20,0,60,2729,17,0],[888,85,6,56,2288,5,36],[889,0,0,6,288,2,3],[890,2,0,50,1747,3,88],[891,1,0,10,570,6,1],[892,100,8,43,1304,5,0],[893,88,3,33,1053,4,11],[894,47,8,38,2130,7,4],[895,96,1,60,2333,7,33],[896,65,1,47,2021,11,4],[897,103,5,51,1940,5,28],[898,1,0,2,130,1,0],[899,35,0,29,1229,2,4],[903,1,0,18,1639,9,0],[904,0,0,12,686,2,0],[906,13,2,31,2456,11,12],[907,33,1,52,2828,11,2],[908,36,1,60,2654,17,93],[909,22,6,60,3193,18,6],[910,177,6,58,851,4,11],[911,98,4,54,1629,3,0],[912,0,0,46,2422,5,42],[913,6,1,39,2265,5,22],[914,0,0,54,3762,10,30],[915,57,5,55,2432,11,5],[916,60,11,56,2614,9,7],[917,0,0,60,4330,21,14],[918,1,0,61,4238,15,49],[919,78,3,61,3378,17,9],[920,174,9,55,1267,9,0],[921,2,0,56,4731,21,15],[922,38,6,40,1816,5,9],[923,36,1,57,2868,11,31],[924,70,16,55,2920,20,10],[925,66,6,48,2910,23,0],[936,0,0,18,1133,6,0],[937,72,2,20,83,1,0],[938,135,4,38,698,2,0],[939,33,4,19,681,5,0],[940,194,13,55,716,2,0],[941,70,2,35,1600,9,0],[942,69,15,26,806,3,0],[943,9,0,8,382,1,0],[944,0,0,18,1318,5,21],[946,0,0,44,2957,8,1],[947,51,5,59,2553,17,2],[948,200,3,58,1580,12,9],[949,43,2,59,3617,26,4],[950,10,0,54,4245,39,1],[951,1,0,58,3923,25,39],[952,6,0,31,1910,9,26],[953,1,0,35,2702,12,16],[954,12,3,46,3315,18,13],[955,29,18,50,2597,16,16],[956,40,8,40,1723,7,30],[957,101,6,53,1164,6,0],[958,0,23,37,1865,4,66],[959,18,0,46,2631,12,0],[960,0,0,10,903,3,0],[961,0,0,14,931,4,0],[962,12,0,17,775,2,0],[963,137,64,52,749,4,0],[964,25,8,12,0,0,0],[965,66,44,22,0,0,0],[966,193,37,56,627,4,0],[967,34,2,27,1580,8,10],[968,60,1,44,1922,8,0],[969,31,13,41,1885,14,12],[970,50,18,50,1653,11,0],[971,76,4,52,2429,23,0],[972,19,0,38,1596,7,32],[973,2,0,54,4199,15,21],[974,39,0,56,2939,13,4],[975,8,0,60,2872,11,7],[976,23,1,25,1212,4,4],[977,34,4,38,1788,7,9],[978,0,0,40,2561,7,10],[979,0,0,10,785,3,1],[980,38,17,44,1898,7,3],[981,25,26,33,1309,6,0],[982,101,5,60,2168,11,5],[983,10,2,54,2624,13,31],[984,86,4,28,590,1,0],[985,107,1,60,3500,19,13],[986,0,0,12,1000,3,3],[987,0,0,4,495,2,0],[988,18,0,44,2923,16,8],[989,0,0,6,210,0,0],[990,2,0,13,1124,3,0],[991,0,0,2,234,2,0],[993,15,9,58,4021,14,39],[994,13,2,34,1998,13,32],[995,8,0,32,2052,12,1],[996,31,1,57,3338,28,3],[997,0,0,28,1527,7,0],[998,6,1,18,903,7,0],[999,0,0,18,933,7,0],[1000,19,0,36,1873,15,0],[1001,0,0,28,1955,8,3],[1002,0,0,28,1072,5,0],[1003,12,0,44,2608,17,0],[1004,0,0,20,880,5,0],[1005,26,0,58,3629,18,12],[1006,27,2,50,2499,21,1],[1007,295,2,52,0,0,0],[1008,17,0,4,0,0,0],[1009,21,0,56,3362,24,14],[1010,19,0,56,4312,34,11],[1011,32,1,59,3538,32,14],[1012,31,0,61,4054,37,5],[1013,28,0,60,3541,34,18],[1014,31,1,60,3710,36,16],[1015,9,0,34,2575,16,10],[1016,32,2,61,3657,42,15],[1017,8,0,50,2863,10,33],[1018,146,7,52,1195,8,0],[1019,0,0,12,193,0,0],[1020,0,0,28,2479,6,7],[1021,98,0,60,2368,9,21],[1022,1,0,34,2147,9,23],[1023,22,8,24,1286,5,0],[1024,1,0,27,1689,10,4],[1025,14,0,36,2016,15,0],[1026,48,5,50,1762,10,0],[1027,183,48,41,23,1,0],[1028,4,53,26,1466,7,0],[1029,11,0,31,2027,12,8],[1030,130,0,41,886,5,3],[1031,44,4,10,365,2,0],[1032,179,8,46,515,2,0],[1033,53,3,36,966,6,27],[1034,1,0,44,1887,11,1],[1035,56,0,24,924,4,12],[1036,151,16,54,1304,7,5],[1037,76,5,42,1665,6,31],[1038,69,1,19,471,6,0],[1039,59,3,11,0,0,0],[1041,66,5,38,1305,1,32],[1042,0,0,40,1060,3,59],[1043,2,0,14,1163,5,5],[1044,53,0,38,1515,5,0],[1045,60,3,43,1452,1,3],[1046,0,0,8,549,3,0],[1047,0,0,16,952,3,0],[1048,7,0,44,2993,10,37],[1049,0,0,38,1746,5,20],[1050,0,0,24,1705,3,3],[1051,0,0,22,711,0,12],[1052,0,0,6,340,0,0],[1053,0,0,24,1186,2,11],[1054,34,2,56,2855,11,39],[1055,60,3,54,2299,10,23],[1056,67,7,60,3242,20,9],[1057,51,7,60,3567,13,12],[1058,73,6,54,1839,10,5],[1059,0,0,2,106,0,0],[1060,0,0,28,1477,4,6],[1061,0,0,6,341,3,0],[1283,1,0,12,514,7,0],[1284,81,0,48,1896,19,0],[1285,110,2,53,1163,17,0],[1286,1,0,41,2196,25,0],[1287,0,0,35,1866,12,0],[1288,0,0,16,591,5,0],[1291,23,0,7,14,0,0],[1292,10,10,22,848,5,0],[1293,44,24,33,69,0,5],[1294,21,32,53,1764,8,0],[1295,90,0,52,571,5,0],[1296,100,8,44,0,0,0],[1297,123,6,47,189,2,0],[1298,13,1,11,210,1,0],[1300,30,11,14,0,0,0],[1301,264,20,59,0,0,0],[1302,208,20,56,0,0,0],[1303,21,0,29,973,13,0],[1304,4,6,51,2430,16,0],[1305,59,19,51,1230,5,0],[1306,125,21,56,1089,2,0],[1307,104,19,36,284,2,0],[1313,12,3,12,194,0,0],[1316,0,0,4,132,0,0],[1318,0,0,0,43,0,0],[1319,39,10,26,434,4,0],[1320,1,0,8,371,3,0],[1321,0,0,0,8,0,0],[1322,1,0,2,79,0,0],[1323,56,7,22,9,1,0],[1324,52,16,33,802,4,0],[1326,2,0,1,0,0,0],[1327,38,5,20,109,0,0],[1328,35,26,30,806,6,0],[1329,1,3,26,1654,8,0],[1330,13,3,17,545,3,0],[1331,0,0,0,74,0,0],[1333,24,0,28,1114,5,0],[1334,0,0,14,833,4,0],[1335,0,0,37,2073,9,0],[1336,200,8,45,363,5,0],[1337,166,6,59,880,6,0],[1338,0,0,4,170,0,0],[1339,12,0,8,315,2,0],[1340,0,0,26,992,3,1],[1341,0,0,10,488,3,0],[1342,0,0,2,70,2,0],[1343,0,0,10,434,8,0],[1344,0,0,8,357,2,0],[1345,0,0,8,422,2,0],[1346,0,0,6,231,3,0],[1347,33,5,42,1244,5,0],[1348,0,0,20,1169,10,0],[1349,0,0,14,941,2,0],[1350,0,0,10,627,3,0],[1351,37,1,26,1070,0,2],[1352,32,2,14,495,4,0],[1353,123,5,28,40,0,0],[1354,6,0,12,353,1,0],[1355,0,0,22,1225,9,0],[1356,0,0,19,1318,8,0],[1357,89,2,40,1544,12,0],[1358,7,0,4,61,0,0],[1359,0,0,4,370,1,0],[1361,0,0,12,421,2,0],[1362,0,0,10,924,11,0],[1363,0,0,10,1012,9,0],[1364,3,0,41,1852,14,0],[1365,185,12,54,492,3,0],[1366,81,1,50,886,1,0],[1367,217,11,55,581,4,0],[1368,132,6,51,1052,8,0],[1369,214,8,58,665,3,0],[1370,182,4,54,838,6,0],[1371,0,4,21,1001,6,103],[1372,127,12,28,0,0,0],[1373,4,0,0,23,0,0],[1374,37,7,20,472,6,0],[1375,124,6,30,134,0,0],[1384,1,0,0,0,0,0],[1392,0,1,31,1063,8,0],[1393,182,14,52,413,2,0]],"2026-09-28":[[565,0,0,2,137,1,0],[566,0,0,6,612,3,0],[567,19,1,40,2356,5,4],[568,0,0,50,2669,5,125],[569,15,0,11,602,4,0],[571,110,8,42,1320,8,6],[572,81,24,54,2225,12,11],[573,167,31,56,144,1,0],[574,29,0,61,3459,25,59],[575,115,11,55,1444,5,0],[576,86,17,55,1470,5,0],[577,130,9,53,933,14,0],[579,0,0,26,1896,12,20],[580,0,0,56,3892,13,53],[581,159,32,39,110,1,3],[582,50,10,53,2111,4,9],[583,0,0,32,1616,5,0],[584,0,0,26,1601,3,9],[585,1,0,56,3277,6,15],[586,11,0,56,2761,9,0],[587,100,8,53,1993,7,24],[588,59,2,31,1692,9,0],[589,59,3,58,1834,2,20],[590,186,19,62,1128,10,0],[591,201,21,50,211,1,0],[592,0,0,26,1912,14,0],[593,2,0,38,2763,8,8],[594,73,11,51,888,1,12],[595,211,20,46,0,0,0],[596,68,6,41,1387,5,2],[597,0,0,4,468,3,10],[598,0,0,32,2131,7,0]]};
+const META = {"range":"2026-09-22 ~ 2026-09-28","last_day":"2026-09-28","generated":"2026-09-28 09:58","days":4};
+const COUNTDOWN = {"2026-09-24":{"total":10,"by_type":{"5":10,"10":0,"25":0},"by_source":{"double_click":8,"single_click":1,"menu":1}}};
+
+const DAY_KEYS = Object.keys(DATA).sort();
+const dataMinute = (k) => DATA[k] || [];
+const fmt = (n) => n.toLocaleString('zh-CN');
+const pad2 = (n) => String(n).padStart(2,'0');
+const dstr = (d) => d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());
+const parseD = (s) => { const p=s.split('-'); return new Date(+p[0],+p[1]-1,+p[2]); };
+const W_MOVE=0.01,W_CLICK=4,W_SCROLL=2;
+const mouseEquiv = (r) => r[4]*W_MOVE+r[5]*W_CLICK+r[6]*W_SCROLL;
+const fmtShort = (n) => n>=10000 ? (n/10000).toFixed(1)+'万' : fmt(n);
+const DOW=['周一','周二','周三','周四','周五','周六','周日'];
+
+function dayTotals(k){
+  let keys=0,bs=0,act=0,mv=0,ck=0,sc=0,meq=0;
+  for(const r of dataMinute(k)){ keys+=r[1];bs+=r[2];act+=r[3];mv+=r[4];ck+=r[5];sc+=r[6];meq+=mouseEquiv(r); }
+  return {keys,bs,act,mv,ck,sc,meq,equiv:keys+meq};
+}
+let maxDayEquiv=1;
+for(const k of DAY_KEYS) maxDayEquiv=Math.max(maxDayEquiv,dayTotals(k).equiv);
+const lvOf=(v)=> v<=0?0:Math.min(5,1+Math.floor(Math.sqrt(v/maxDayEquiv)*4.999));
+
+let ALL_KEYS=0,ALL_BS=0,ALL_ACT=0,ALL_MV=0,ALL_CK=0,ALL_SC=0,ALL_MEQ=0,BEST_DAY=null,BEST_EQUIV=0;
+const hourTotals=new Array(24).fill(0), dowTotals=new Array(7).fill(0), dowCount=new Array(7).fill(0);
+const hourSum={};
+for(const k of DAY_KEYS){
+  const t=dayTotals(k); const d=parseD(k); const di=(d.getDay()+6)%7;
+  ALL_KEYS+=t.keys;ALL_BS+=t.bs;ALL_ACT+=t.act;ALL_MV+=t.mv;ALL_CK+=t.ck;ALL_SC+=t.sc;ALL_MEQ+=t.meq;
+  if(t.equiv>BEST_EQUIV){BEST_EQUIV=t.equiv;BEST_DAY=k;}
+  dowTotals[di]+=t.equiv; dowCount[di]++;
+  const arr=new Array(24).fill(0);
+  for(const r of dataMinute(k)) arr[Math.floor(r[0]/60)] += r[1]+mouseEquiv(r);
+  hourSum[k]=arr;
+  for(let h=0;h<24;h++) hourTotals[h]+=arr[h];
+}
+const MOUSE_SHARE=(ALL_KEYS+ALL_MEQ)?(ALL_MEQ/(ALL_KEYS+ALL_MEQ)*100):0;
+const ALL_EQUIV=ALL_KEYS+ALL_MEQ;
+const ACTIVE_MIN=DAY_KEYS.reduce((a,k)=>a+dataMinute(k).filter(r=>r[1]>0||r[4]>0||r[5]>0||r[6]>0).length,0);
+const TOTAL_EQUIV=ALL_EQUIV;
+let gmax=1; for(const k of DAY_KEYS) for(const v of hourSum[k]) gmax=Math.max(gmax,v);
+const avgAllHour=new Array(24).fill(0);
+for(const k of DAY_KEYS) for(let h=0;h<24;h++) avgAllHour[h]+=hourSum[k][h];
+for(let h=0;h<24;h++) avgAllHour[h]/=DAY_KEYS.length;
+const hourOfDay=(k,h)=> hourSum[k]?hourSum[k][h]:0;
+
+/* 单色相饱和度色阶（ember 色相，靠 S/L 区分热度；深浅色各自适配） */
+function hueColor(t){
+  t=Math.max(0,Math.min(1,t));
+  const dark=document.documentElement.dataset.theme==='dark';
+  const S = dark ? (45+45*t) : (35+50*t);
+  const L = dark ? (30+26*t) : (90-46*t);
+  return 'hsl(18,'+S.toFixed(0)+'%,'+L.toFixed(0)+'%)';
+}
+
+/* 画像 */
+const NIGHT=[22,23,0,1,2,3,4,5], MORN=[5,6,7,8,9];
+const nightSum=NIGHT.reduce((a,h)=>a+hourTotals[h],0);
+const mornSum=MORN.reduce((a,h)=>a+hourTotals[h],0);
+const weekdayAvg=(dowTotals[0]+dowTotals[1]+dowTotals[2]+dowTotals[3]+dowTotals[4])/(dowCount[0]+dowCount[1]+dowCount[2]+dowCount[3]+dowCount[4]||1);
+const weekendAvg=(dowTotals[5]+dowTotals[6])/(dowCount[5]+dowCount[6]||1);
+let persona,desc;
+if(weekendAvg>weekdayAvg*1.18 && (dowCount[5]+dowCount[6])>0){ persona='周末战士'; desc='工作日克制、周末火力全开——你的高强度输入集中在周六日。'; }
+else if(nightSum/TOTAL_EQUIV>0.28){ persona='夜猫子'; desc='晚上 22 点后是主战场，越夜越活跃；白天更像在蓄力。'; }
+else if(mornSum/TOTAL_EQUIV>0.20){ persona='早起鸟'; desc='清晨最利落，上午节奏最稳。'; }
+else { persona='规律型'; desc='活跃分布较均衡，没有明显极端时段，节奏稳。'; }
+
+function countUp(el,target,suffix='',deci=0){
+  el.textContent = deci? target.toFixed(deci) : (target>=10000?(target/10000).toFixed(1)+'万':Math.round(target).toLocaleString('zh-CN'));
+}
+
+/* HERO */
+document.getElementById('persona').textContent=persona;
+document.getElementById('hero-title').textContent='你这 '+DAY_KEYS.length+' 天，是个「'+persona+'」';
+const bestDow='日一二三四五六'[parseD(BEST_DAY).getDay()];
+const bestHr=hourTotals.indexOf(Math.max(...hourTotals));
+document.getElementById('hero-desc').textContent='最热的一天是 '+BEST_DAY+'（'+bestDow+'），全周期最活跃的小时是 '+pad2(bestHr)+':00 前后。'+desc;
+const daysN=DAY_KEYS.length||1;
+/* hero 三卡与总览砖块同一套契约：顶色条 = 族色（键盘蓝 / 时间绿 / 鼠标橙）、右上角标 = 族名；
+   右列补一条同源推导的次要信息（日均 / 当量）填掉 321px 宽卡右侧那 208px 白。 */
+const heroStats=[
+  ['总击键数',ALL_KEYS,'',0,'var(--kb)','键盘','日均 '+fmtShort(Math.round(ALL_KEYS/daysN))],
+  ['活跃时长',ALL_ACT/3600,'小时',1,'var(--tm)','时间','日均 '+(ALL_ACT/3600/daysN).toFixed(1)+' 小时'],
+  ['鼠标占比',MOUSE_SHARE,'%',1,'var(--ms)','鼠标','当量 '+fmtShort(Math.round(ALL_MEQ))]];
+document.getElementById('hero-stats').innerHTML=heroStats.map(([k,v,u,d,tc,tk,side])=>
+  '<div class="tile wide" style="--a:auto;--tc:'+tc+'">'+
+    '<span class="tk">'+tk+'</span>'+
+    '<div class="wmain"><div class="k">'+k+'</div><div class="v"><span></span>'+(u?'<small>'+u+'</small>':'')+'</div></div>'+
+    '<div class="wside">'+side+'</div>'+
+  '</div>').join('');
+const hEls=document.querySelectorAll('#hero-stats .v span');
+heroStats.forEach((s,i)=>countUp(hEls[i],s[1],s[2],s[3]));
+
+/* 总览：铺地砖式语义排布
+   一块「输入构成」主砖把键盘占比 / 鼠标占比用双环图并置——二者天然互补，
+   并置即表达"同一件事的两面"。主砖**同属键盘行与鼠标行**，故纵向横跨这两行、置于行末；
+   时间行是独立维度，单独一行铺底部。区域名 kb / ms / tm = 键盘行 / 鼠标行 / 时间行；
+   窄屏 auto-fill 时按 [键盘3,鼠标3,时间3] 的数组顺序填充，同样保持同类相邻。
+   文字位置全砖统一（标签左上 / 数值左下）：主砖的标题与底部数字用同一套对齐，
+   时间行三块较宽，左列沿用同一套对齐、右列放一条同源推导的次要信息填掉空白。 */
+function renderClusteredStats(){
+  const hours=ALL_ACT/3600;
+  const avgRate=ACTIVE_MIN?Math.round(ALL_EQUIV/ACTIVE_MIN):0;
+  const bsRate=(ALL_KEYS+ALL_BS)?(ALL_BS/(ALL_KEYS+ALL_BS)*100):0;
+  const perDay=DAY_KEYS.length?Math.round(ALL_EQUIV/DAY_KEYS.length):0;
+  const days=DAY_KEYS.length||1;
+  const KSHARE=MOUSE_SHARE?(100-MOUSE_SHARE):0;
+  /* 区域名按「所在行 + 行内序」命名：kb / ms / tm 前缀分别对应键盘行 / 鼠标行 / 时间行，
+     数组顺序 [键盘3, 鼠标3, 时间3] 保证窄屏 auto-fill 自填时同类仍相邻。 */
+  const tiles=[
+    {a:'kb1', tc:'var(--kb)', tk:'键盘', k:'总击键数', v:ALL_KEYS, u:'', d:0},
+    {a:'kb2', tc:'var(--kb)', tk:'键盘', k:'退格占比', v:bsRate, u:'%', d:1},
+    {a:'kb3', tc:'var(--kb)', tk:'键盘', k:'活跃时段均速', v:avgRate, u:'活跃/分', d:0},
+    {a:'ms1', tc:'var(--ms)', tk:'鼠标', k:'鼠标移动', v:fmtShort(ALL_MV), u:'次', num:false},
+    {a:'ms2', tc:'var(--ms)', tk:'鼠标', k:'鼠标点击', v:fmtShort(ALL_CK), u:'次', num:false},
+    {a:'ms3', tc:'var(--ms)', tk:'鼠标', k:'鼠标滚轮', v:fmtShort(ALL_SC), u:'格', num:false},
+    {a:'tm1', tc:'var(--tm)', tk:'时间', k:'活跃时长', v:hours, u:'小时', d:1, wide:true, side:'日均 '+(hours/days).toFixed(1)+' 小时'},
+    {a:'tm2', tc:'var(--tm)', tk:'时间', k:'日均活跃', v:fmtShort(perDay), u:'', num:false, wide:true, side:'共 '+days+' 个活跃日'},
+    {a:'tm3', tc:'var(--tm)', tk:'时间', k:'最热一天', v:BEST_DAY?BEST_DAY.slice(5):'--', u:'', num:false, wide:true, side:BEST_DAY?'当量 '+fmtShort(Math.round(BEST_EQUIV)):'--'},
+  ];
+  const host=document.getElementById('stats');
+  host.innerHTML=
+    '<div class="tile comp" style="--a:comp">'+
+      '<div class="comp-info">'+
+        '<div class="comp-h">输入构成<span>键盘 / 鼠标 占总输入当量</span></div>'+
+        '<div class="comp-foot">总输入当量 <b>'+fmt(ALL_EQUIV)+'</b></div>'+
+      '</div>'+
+      '<div class="donuts">'+
+        '<div class="donut-wrap"><div class="donut" id="donut-kb" style="--c:var(--kb)"><span class="pct">0%</span></div><div class="dlab">⌨ 键盘</div></div>'+
+        '<div class="donut-wrap"><div class="donut" id="donut-ms" style="--c:var(--ms)"><span class="pct">0%</span></div><div class="dlab">🖱 鼠标</div></div>'+
+      '</div>'+
+    '</div>'+
+    tiles.map(t=>{
+      const vHtml='<div class="v"><span class="n"></span>'+(t.u?'<small>'+t.u+'</small>':'')+'</div>';
+      return '<div class="tile'+(t.wide?' wide':'')+'" style="--a:'+t.a+';--tc:'+t.tc+'">'+
+        '<span class="tk">'+t.tk+'</span>'+
+        /* 宽砖：左列仍是「标签上 / 数值下」（与其余砖左缘对齐），右列放次要信息填满宽度 */
+        (t.wide
+          ? '<div class="wmain"><div class="k">'+t.k+'</div>'+vHtml+'</div>'+
+            '<div class="wside">'+(t.side||'')+'</div>'
+          : '<div class="k">'+t.k+'</div>'+vHtml)+
+      '</div>';
+    }).join('');
+  let i=0;
+  tiles.forEach(t=>{
+    const span=host.querySelectorAll('.tile .n')[i++];
+    if(t.num===false) span.textContent=t.v;
+    else countUp(span,t.v,'',t.d||0);
+  });
+  animDonut(document.getElementById('donut-kb'),KSHARE);
+  animDonut(document.getElementById('donut-ms'),MOUSE_SHARE);
+}
+function animDonut(el,target){
+  if(!el) return;
+  const pct=el.querySelector('.pct'), dur=900, t0=performance.now();
+  (function step(now){
+    const p=Math.min(1,(now-t0)/dur), e=1-Math.pow(1-p,3), val=target*e;
+    el.style.setProperty('--p',val.toFixed(2));
+    pct.textContent=Math.round(val)+'%';
+    if(p<1) requestAnimationFrame(step);
+  })(performance.now());
+}
+
+/* 7x24 周视图 */
+const firstD=parseD(DAY_KEYS[0]),lastD=parseD(DAY_KEYS[DAY_KEYS.length-1]);
+let wstart=new Date(firstD); wstart.setDate(wstart.getDate()-((wstart.getDay()+6)%7));
+const weeks=[]; { let c=new Date(wstart);
+  while(c<=lastD){ const mon=new Date(c); const days=[];
+    for(let i=0;i<7;i++){ const k=dstr(c); days.push(DATA[k]?k:null); c.setDate(c.getDate()+1); }
+    weeks.push({monday:mon,days}); } }
+let selectedWeekIndex=weeks.length-1;
+function renderWeekHeatmap(){
+  const wk=weeks[selectedWeekIndex];
+  const host=document.getElementById('heat7');
+  let html='<div class="wl"></div>'+Array.from({length:24},(_,h)=>'<div class="wh">'+(h%3===0?pad2(h):'')+'</div>').join('');
+  for(let i=0;i<7;i++){
+    html+='<div class="wl">'+DOW[i]+'</div>';
+    for(let h=0;h<24;h++){
+      const k=wk.days[i];
+      if(k){ const v=hourOfDay(k,h);
+        html+='<div class="hc" data-v="'+v+'" data-tip="'+k+' '+DOW[i]+' '+pad2(h)+':00 · 综合活跃 '+fmt(v)+'"></div>';
+      } else html+='<div class="hc hc-off"></div>';
+    }
+  }
+  html+='<div class="wl av">平均</div>';
+  for(let h=0;h<24;h++){ const v=avgAllHour[h];
+    html+='<div class="hc" data-v="'+Math.round(v)+'" data-tip="全周期平均 '+pad2(h)+':00 · 综合活跃 '+fmt(Math.round(v))+'"></div>'; }
+  host.innerHTML=html;
+  host.querySelectorAll('.hc').forEach(el=>{ if(!el.classList.contains('hc-off')) el.style.background=hueColor(Math.sqrt(+el.dataset.v/gmax)); });
+  document.getElementById('week-label').textContent=dstr(wk.monday)+' 当周（'+wk.days.filter(Boolean).length+' 天有数据）';
+  document.getElementById('week-prev').disabled=selectedWeekIndex<=0;
+  document.getElementById('week-next').disabled=selectedWeekIndex>=weeks.length-1;
+  attachTips(host);
+}
+document.getElementById('week-prev').onclick=()=>{ if(selectedWeekIndex>0){selectedWeekIndex--;renderWeekHeatmap();} };
+document.getElementById('week-next').onclick=()=>{ if(selectedWeekIndex<weeks.length-1){selectedWeekIndex++;renderWeekHeatmap();} };
+
+/* 全年日历（通用）：按月切块，块间留间隔，每块自带月份标签 */
+function renderYearCalendar(hostId,valueMap,maxVal,tipFn,clickFn){
+  const host=document.getElementById(hostId);
+  const end=parseD(META.last_day||DAY_KEYS[DAY_KEYS.length-1]);
+  /* 窗口固定为“截至当前月的 12 个月”并整月对齐：左边不再残留跨年的半个 9 月，也不会出现重复的 9 月 */
+  const endMonth=new Date(end.getFullYear(),end.getMonth(),1);
+  const endD=new Date(endMonth); endD.setMonth(endD.getMonth()+1); endD.setDate(endD.getDate()-1); /* 月末 */
+  let start=new Date(endMonth); start.setMonth(start.getMonth()-11); /* 11 个月前的月初 → 共 12 个月（不回退到周一，否则会再次掉回上一个 9 月） */
+  const byMonth={};
+  let d=new Date(start);
+  while(d<=endD){ const ym=d.getFullYear()*12+d.getMonth(); (byMonth[ym]=byMonth[ym]||[]).push(new Date(d)); d.setDate(d.getDate()+1); }
+  let html='';
+  Object.keys(byMonth).sort((a,b)=>a-b).forEach(ym=>{
+    const days=byMonth[ym]; const first=days[0]; const lead=((first.getDay()+6)%7);
+    let cells='';
+    for(let i=0;i<lead;i++) cells+='<div class="ycell blank"></div>';
+    days.forEach(dt=>{ const k=dstr(dt); const v=valueMap[k];
+      if(v==null) cells+='<div class="ycell" data-v="0"></div>';
+      else cells+='<div class="ycell" data-v="'+v+'" data-tip="'+tipFn(k,v)+'"'+(clickFn?' data-k="'+k+'"':'')+'></div>'; });
+    html+='<div class="ym-block"><div class="ym-label">'+(first.getMonth()+1)+'月</div><div class="ym-grid">'+cells+'</div></div>';
+  });
+  host.innerHTML=html;
+  host.querySelectorAll('.ycell[data-v]').forEach(el=>{ const v=+el.dataset.v;
+    el.style.background = v ? hueColor(maxVal>0?Math.sqrt(v/maxVal):0) : 'var(--line-soft)'; });
+  if(clickFn){ host.querySelectorAll('.ycell[data-k]').forEach(el=>{ el.style.cursor='pointer';
+    el.addEventListener('click',()=>{ if(DATA[el.dataset.k]) clickFn(el.dataset.k); }); }); }
+  attachTips(host);
+  fitCalendar(host);
+}
+/* 窄屏适配：从最旧的月份起依次隐藏，只保留能容纳在容器内、不出现横向滚动条的最近内容 */
+function fitCalendar(host){
+  const scroll=host.parentElement; if(!scroll) return;
+  const avail=scroll.clientWidth-2; if(avail<=0) return;
+  const blocks=[...host.children];
+  blocks.forEach(b=>b.style.display='');
+  host.getBoundingClientRect();
+  let acc=0, stop=false;
+  /* 从最新月份往旧累加，装不下就**停止**（更旧的整块一并隐藏）。
+     不能像原来那样"跳过装不下的宽月份、继续试更旧的窄月份" ——
+     那会让日历中间断层：实测 744px 宽时出现过显示 2月 / 4月 / 5月…，独独缺 3月
+     （3 月正好多一列，宽度 93 塞不进，而 4 月只有 77 就"跳"进去了）。 */
+  for(let i=blocks.length-1;i>=0;i--){
+    if(stop){ blocks[i].style.display='none'; continue; }
+    const w=blocks[i].getBoundingClientRect().width;
+    const cand=acc+(acc>0?16:0)+w;
+    if(cand<=avail){ acc=cand; } else { blocks[i].style.display='none'; stop=true; }
+  }
+  /* 把「内容居中后的实际内缩量」交给同卡片的图例，让它的右缘跟日历右缘齐
+     （`margin-inline:auto` 的留白 = (可用宽 − 内容宽)/2）。量真实 rect 而非 acc，
+     避免累加取整误差。内容比容器还宽时内缩取 0。 */
+  const inset=Math.max(0,(scroll.clientWidth-host.getBoundingClientRect().width)/2);
+  scroll.parentElement.style.setProperty('--cal-inset', inset.toFixed(1)+'px');
+}
+const actMap={}; for(const k of DAY_KEYS) actMap[k]=dayTotals(k).equiv;
+function renderActivityCalendar(){ renderYearCalendar('year-cal',actMap,maxDayEquiv,
+  (k,v)=> k+' · 综合活跃 '+fmt(v)+' · 键 '+fmt(dayTotals(k).keys),
+  k=>{ selectDay(k); activateView('day'); }); }
+
+/* 倒计时每日 -> 日历热力图 */
+const CD_DAYS=Object.keys(COUNTDOWN).sort();
+const cdMap={}; let cdMax=1;
+for(const k of CD_DAYS){ cdMap[k]=COUNTDOWN[k].total; cdMax=Math.max(cdMax,COUNTDOWN[k].total); }
+const CD_TYPE_LABEL={5:'5 分钟',10:'10 分钟',25:'25 分钟'};
+const CD_SOURCE_LABEL={menu:'托盘菜单',double_click:'双击快速开始',single_click:'单击图标',hotkey:'热键'};
+function renderCountdownCalendar(){ renderYearCalendar('cd-cal',cdMap,cdMax,
+  (k,v)=>{ const d=COUNTDOWN[k];
+    const typeStr=[5,10,25].filter(t=>d.by_type[t]).map(t=>CD_TYPE_LABEL[t]+' '+d.by_type[t]).join(' · ');
+    const srcStr=Object.keys(d.by_source).map(s=>CD_SOURCE_LABEL[s]+' '+d.by_source[s]).join(' · ');
+    return k+' · 共 '+v+' 次\n类型：'+(typeStr||'无')+'\n来源：'+(srcStr||'无'); }, false); }
+
+/* 小时分布（含日期导航，原分钟级合并进来） */
+let selectedDay=META.last_day||(DAY_KEYS.length?DAY_KEYS[DAY_KEYS.length-1]:'');
+function drawBars(k){
+  const hourly=new Array(24).fill(0),hourlyMv=new Array(24).fill(0),hourlyMeq=new Array(24).fill(0),hourlyAct=new Array(24).fill(0);
+  for(const r of dataMinute(k)){const h=Math.floor(r[0]/60);hourly[h]+=r[1];hourlyAct[h]+=r[3];hourlyMv[h]+=r[4];hourlyMeq[h]+=mouseEquiv(r);}
+  const hourlyEquiv=hourly.map((v,h)=>v+hourlyMeq[h]);
+  let mx=1;for(const v of hourlyEquiv)mx=Math.max(mx,v);
+  document.getElementById('bars').innerHTML=hourlyEquiv.map((eq,h)=>{
+    if(!eq)return '<div class="bar off" style="height:2%" title="'+pad2(h)+':00 — 无活动"></div>';
+    const pct=Math.max(3,eq/mx*100);const mPct=Math.min(100,hourlyMeq[h]/eq*100);
+    const title=pad2(h)+':00 — 键 '+fmt(hourly[h])+' · 鼠 '+fmt(hourlyMv[h])+' 次移动，'+(hourlyAct[h]/60).toFixed(0)+' 分钟活跃';
+    return '<div class="bar" style="height:'+pct+'%" title="'+title+'"><div class="bar-m" style="height:'+mPct+'%"></div></div>';
+  }).join('');
+  document.getElementById('bar-x').innerHTML=hourly.map((_,h)=>'<div'+(h%3?' class="hide"':'')+'>'+(h%3===0?pad2(h):'')+'</div>').join('');
+}
+/* 日期信息块的两行内容：`[优先级 data-p, 文案]`，**p 越小越先被裁**。
+   数组顺序 = 屏幕上从左到右的展示顺序，与裁剪顺序**解耦**：裁的永远是 p 最小的那一段，
+   留下的仍是原来那套读法（别把数组按裁剪顺序排，否则窄屏剩下的几段会"跳跃式"阅读）。
+   ⚠ 两行合起来是**一条**优先级梯子（fitDayInfo 统一裁），所以「星期」虽然长在标题行上，
+   也可能先于统计项被裁掉。梯子（从先裁到后裁）：
+     活跃分钟(1) → 小时(2) → 鼠标(3) → 综合活跃(4) → 次击键(5) → 星期(6) → 日期(9，永不裁)。 */
+function dayInfoSegs(k,t,activeMin){
+  return {title:[[9,k],[6,'周'+'日一二三四五六'[parseD(k).getDay()]]],
+          meta:[[5, fmt(t.keys)+' 次击键'],
+                [3, '鼠标 '+fmt(t.mv)+' 移动 / '+fmt(t.ck)+' 点击'],
+                [4, fmt(Math.round(t.equiv))+' 综合活跃'],
+                [2, (t.act/3600).toFixed(1)+' 小时'],
+                [1, fmt(activeMin)+' 个活跃分钟']]};
+}
+function fillDayInfo(k,t,activeMin){
+  const s=dayInfoSegs(k,t,activeMin);
+  document.getElementById('day-title').innerHTML=s.title.map(function(x){
+    return '<span class="seg" data-p="'+x[0]+'">'+x[1]+'</span>';}).join('');
+  document.getElementById('day-meta').innerHTML=s.meta.map(function(x,i){
+    return '<span class="seg'+(i?'':' lead')+'" data-p="'+x[0]+'">'+x[1]+'</span>';}).join('');
+}
+/* 按**实测宽度**逐段裁剪，而不是媒体查询：卡片宽度由页面栅格（.wrap 限宽 + 卡片 padding）
+   决定，与视口宽度不成正比，写断点必然对不齐。
+   可用宽度 = 导航行宽 − 两侧各(最宽按钮 + gap)，再留 2px 取整余量。
+   量的是 `.day-info` 整体（两行取宽的那一行），所以两行共用一条梯子。 */
+function fitDayInfo(){
+  const nav=document.getElementById('day-nav'); if(!nav) return;
+  const info=document.getElementById('day-info');
+  const segs=[].slice.call(info.querySelectorAll('.seg'));
+  if(!segs.length) return;
+  const pv=document.getElementById('day-prev'), nx=document.getElementById('day-next');
+  const gap=10;                                    /* 与 .day-nav 的 gap 一致 */
+  const btn=Math.max(pv.offsetWidth,nx.offsetWidth);
+  const avail=nav.clientWidth-2*(btn+gap)-2;
+  /* 每次从「标准字号」重算，否则从窄屏拉宽后会一直卡在 .tight 状态 */
+  info.classList.remove('tight');
+  for(let pass=0;pass<2;pass++){
+    segs.forEach(function(s){s.style.display='';});
+    for(let guard=0;guard<=segs.length;guard++){
+      if(info.scrollWidth<=avail) break;
+      const vis=segs.filter(s=>s.style.display!=='none');
+      if(vis.length<=1) break;                     /* 至少留优先级最高的那段（=日期） */
+      /* ⚠ 取 p **最小**的那段裁（p 越小越不重要）—— 方向写反过一次：写成取 max p 时，
+         第一个被裁的就是 p=5 的「次击键」，留下的反而是 p=1 的「活跃分钟」，
+         正好把最该留的裁掉。方向由探针的 cropOk（被裁的最大 p < 留下的最小 p）守住。 */
+      let drop=vis[0];
+      for(const s of vis) if(+s.dataset.p<+drop.dataset.p) drop=s;
+      drop.style.display='none';
+    }
+    if(info.scrollWidth<=avail) break;
+    /* 兜底档：段已裁到一个、仍装不下（超窄屏）= 连「日期」都放不下 → 收一级字号，
+       再裁一遍。宁可字小一号，也不让日期压到按钮上。 */
+    info.classList.add('tight');
+  }
+  /* 段间分隔点只挂在统计行上（日期与星期之间是留白，见 CSS），
+     所以"统计行第一个可见段"要单独去点。 */
+  const ms=[].slice.call(info.querySelectorAll('#day-meta .seg'));
+  ms.forEach(s=>s.classList.remove('lead'));
+  for(const s of ms) if(s.style.display!=='none'){s.classList.add('lead');break;}
+}
+function selectDay(k){
+  selectedDay=k;const idx=DAY_KEYS.indexOf(k);
+  const t=dayTotals(k);const activeMin=dataMinute(k).filter(r=>r[1]>0||r[4]>0||r[5]>0||r[6]>0).length;
+  fillDayInfo(k,t,activeMin);
+  document.getElementById('day-prev').disabled=idx<=0;
+  document.getElementById('day-next').disabled=idx<0||idx>=DAY_KEYS.length-1;
+  drawBars(k);
+  fitDayInfo();      /* 换天 → 日期与数字长度都变，重新裁到装得下 */
+}
+document.getElementById('day-prev').onclick=()=>{const i=DAY_KEYS.indexOf(selectedDay);if(i>0)selectDay(DAY_KEYS[i-1]);};
+document.getElementById('day-next').onclick=()=>{const i=DAY_KEYS.indexOf(selectedDay);if(i>=0&&i<DAY_KEYS.length-1)selectDay(DAY_KEYS[i+1]);};
+
+/* 倒计时统计 */
+let CD_TOTAL=0,CD_DAYS_N=0,CD_TOP_TYPE=null,CD_TOP_N=0;const CD_BY_TYPE={},CD_BY_SOURCE={};
+for(const k of CD_DAYS){const d=COUNTDOWN[k];CD_TOTAL+=d.total;for(const t in d.by_type)CD_BY_TYPE[t]=(CD_BY_TYPE[t]||0)+d.by_type[t];for(const s in d.by_source)CD_BY_SOURCE[s]=(CD_BY_SOURCE[s]||0)+d.by_source[s];}
+CD_DAYS_N=CD_DAYS.length;for(const t in CD_BY_TYPE)if(CD_BY_TYPE[t]>CD_TOP_N){CD_TOP_N=CD_BY_TYPE[t];CD_TOP_TYPE=t;}
+const CD_AVG=CD_DAYS_N?CD_TOTAL/CD_DAYS_N:0;
+function renderCountdown(){
+  const sec=document.getElementById('countdown');
+  if(!CD_DAYS.length){sec.innerHTML='<h2>倒计时功能的统计 <span>每天使用次数，按类型计数</span></h2><div class="empty">还没有倒计时记录。</div>';return;}
+  const topLabel=CD_TOP_TYPE?(CD_TYPE_LABEL[CD_TOP_TYPE]||(CD_TOP_TYPE+' 分钟')):'--';
+  const srcKinds=Object.keys(CD_BY_SOURCE).filter(s=>CD_BY_SOURCE[s]>0).length;
+  const cdRange=CD_DAYS_N?(CD_DAYS_N>1?CD_DAYS[0].slice(5)+'~'+CD_DAYS[CD_DAYS_N-1].slice(5):CD_DAYS[0].slice(5)):'--';
+  /* 与总览砖块共用 `.tile` 契约：顶色条 = 族色(倒计时·紫)、右上角标「倒计时」、标签左上 · 数值左下；
+     卡宽 254px 而内容仅 ~90px，故走 .wide 让右列承担一条同源推导的次要信息
+     （来源种类 / 日期范围 / 峰值日 / 占比），把右侧 152px 白用掉。 */
+  const cdCards=[
+    ['总倒计时次数',fmt(CD_TOTAL),'次','','来源 '+srcKinds+' 种'],
+    ['使用天数',fmt(CD_DAYS_N),'天','','范围 '+cdRange],
+    ['日均次数',CD_AVG.toFixed(1),'次/天','','峰值 '+fmt(cdMax)+' 次'],
+    ['最常用类型',topLabel,CD_TOP_N?fmt(CD_TOP_N)+' 次':'','txt',CD_TOTAL?('占 '+Math.round(CD_TOP_N/CD_TOTAL*100)+'%'):'--']];
+  document.getElementById('cd-stats').innerHTML='<div class="cd-sum">'+cdCards.map(function(c){
+    return '<div class="tile wide" style="--a:auto;--tc:var(--cd)">'+
+      '<span class="tk">倒计时</span>'+
+      '<div class="wmain"><div class="k">'+c[0]+'</div><div class="v'+(c[3]?' '+c[3]:'')+'">'+
+      c[1]+(c[2]?'<small>'+c[2]+'</small>':'')+'</div></div>'+
+      '<div class="wside">'+(c[4]||'')+'</div>'+
+    '</div>';}).join('')+'</div>';
+  const maxT=Math.max(1,...[5,10,25].map(t=>CD_BY_TYPE[t]||0));
+  document.getElementById('cd-types').innerHTML=[5,10,25].map(t=>{
+    const n=CD_BY_TYPE[t]||0;const pct=Math.round(n/maxT*100);const share=CD_TOTAL?(n/CD_TOTAL*100).toFixed(0)+'%':'0%';
+    return '<div class="cd-type"><span class="lab">'+(CD_TYPE_LABEL[t]||(t+' 分钟'))+'</span><span class="bar-bg"><span class="bar-fg" style="width:'+Math.max(pct,n?4:0)+'%"></span></span><span class="num">'+fmt(n)+' 次 · '+share+'</span></div>';
+  }).join('');
+}
+
+/* 共享 tooltip */
+function showTip(e,text){const t=document.getElementById('gtip');t.textContent=text;t.style.opacity=1;t.style.left=(e.clientX+12)+'px';t.style.top=(e.clientY-30)+'px';}
+function hideTip(){document.getElementById('gtip').style.opacity=0;}
+function attachTips(scope){ scope.querySelectorAll('[data-tip]').forEach(el=>{
+  el.addEventListener('mousemove',ev=>showTip(ev,el.dataset.tip));
+  el.addEventListener('mouseleave',hideTip); }); }
+
+/* 按钮 */
+document.getElementById('btn-copy').onclick=()=>{
+  const txt=['键盘热度报告 '+META.range,'总击键数：'+fmt(ALL_KEYS),'鼠标占比：'+MOUSE_SHARE.toFixed(1)+'%',
+    '活跃时长：'+(ALL_ACT/3600).toFixed(1)+' 小时','最热一天：'+(BEST_DAY||'--')+'（综合活跃 '+fmt(Math.round(BEST_EQUIV))+'）'].join('\n');
+  navigator.clipboard.writeText(txt).then(()=>{const b=document.getElementById('btn-copy');b.textContent='已复制';setTimeout(()=>b.textContent='复制摘要',1400);});
+};
+document.getElementById('btn-csv').onclick=()=>{
+  const rows=['date,minute,keystrokes,backspaces,active_seconds,mouse_moves,clicks,scrolls'];
+  for(const k of DAY_KEYS)for(const r of dataMinute(k))rows.push(k+','+('00'+Math.floor(r[0]/60)).slice(-2)+':'+('00'+(r[0]%60)).slice(-2)+','+r.slice(1).join(','));
+  const blob=new Blob(['\ufeff'+rows.join('\n')],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='keyboard-heat-'+dstr(new Date())+'.csv';a.click();URL.revokeObjectURL(a.href);
+};
+const btnTheme=document.getElementById('btn-theme');
+btnTheme.onclick=()=>{const dark=document.documentElement.dataset.theme==='dark';document.documentElement.dataset.theme=dark?'light':'dark';btnTheme.textContent=dark?'切换深色':'切换浅色';
+  renderWeekHeatmap(); renderActivityCalendar(); renderCountdownCalendar(); };
+if(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches){document.documentElement.dataset.theme='dark';btnTheme.textContent='切换浅色';}
+
+/* 视图切换：日历 / 周×小时 / 当天 三个面板互斥显隐，共用同一卡片位置（.view-pane） */
+function activateView(view){
+  const tabs=document.querySelectorAll('.view-tabs .tab'); if(!tabs.length) return;
+  const panes=document.querySelectorAll('.view-pane');
+  tabs.forEach(x=>x.classList.toggle('active',x.dataset.view===view));
+  panes.forEach(p=>{ p.hidden=(p.dataset.pane!==view); });
+  /* 切回日历时重新按当前宽度拟合（隐藏期间若缩放过，需重算月份裁剪与图例内缩）；
+     切到当天时 day pane 刚显示，重新按宽度裁剪日期信息块（隐藏期间量到的宽度无效） */
+  if(view==='cal'){ const c=document.getElementById('year-cal'); if(c) fitCalendar(c); }
+  if(view==='day'){ fitDayInfo(); }
+}
+function initViewTabs(){ document.querySelectorAll('.view-tabs .tab').forEach(t=>t.addEventListener('click',()=>activateView(t.dataset.view))); }
+
+/* 窗口缩放时重新按宽度裁剪日历与日期信息块，避免横向滚动条 / 压住按钮 */
+let _fitT=null;
+window.addEventListener('resize',()=>{ clearTimeout(_fitT); _fitT=setTimeout(()=>{
+  fitCalendar(document.getElementById('year-cal')); fitCalendar(document.getElementById('cd-cal'));
+  fitDayInfo(); },120); });
+
+document.getElementById('hdr-range').textContent=META.range?(META.range+' · '+DAY_KEYS.length+' 天'):'暂无数据';
+if(!DAY_KEYS.length){document.querySelectorAll('.panel').forEach(p=>p.innerHTML='<div class="empty">还没有采集到数据。</div>');}
+else{ renderClusteredStats(); renderWeekHeatmap(); renderActivityCalendar(); selectDay(selectedDay); renderCountdown(); renderCountdownCalendar(); }
+initViewTabs();
+</script>
+<script>/* 强制切换到暗色主题，用于核对砖块配色在暗底下的对比度 */
+document.documentElement.setAttribute('data-theme', 'dark');
+(function(){
+  function rect(el){ if(!el) return null; var r=el.getBoundingClientRect();
+    return {l:+r.left.toFixed(1),t:+r.top.toFixed(1),w:+r.width.toFixed(1),h:+r.height.toFixed(1)}; }
+  /* 文字「墨迹」盒：Range.selectNodeContents 量字形实际矩形，不是行盒。 */
+  function ink(el){ if(!el) return null; var rg=document.createRange();
+    rg.selectNodeContents(el); var r=rg.getBoundingClientRect();
+    return {l:+r.left.toFixed(1),t:+r.top.toFixed(1),w:+r.width.toFixed(1),h:+r.height.toFixed(1)}; }
+  function rgb(s){ var m=/rgba?\(([^)]+)\)/.exec(s||''); if(!m) return null;
+    var a=m[1].split(',').map(function(x){return parseFloat(x);}); return [a[0],a[1],a[2]]; }
+  /* 卡底别读卡片的 computed backgroundColor：卡片常带 transition（.tile{transition:.2s}）,
+     background-color 也在过渡里 → 同一 tick 内切主题（如注入 dark.js）会读到**过渡起点**，
+     得出假的低对比度。改用 :root 上的主题变量（自定义属性不参与过渡，即刻生效）。 */
+  function anyColor(s){ s=(s||'').trim();
+    if(s.charAt(0)==='#'){
+      if(s.length===5) s='#'+s[1]+s[1]+s[2]+s[2]+s[3]+s[3];
+      if(s.length!==7) return null;
+      return [parseInt(s.substr(1,2),16),parseInt(s.substr(3,2),16),parseInt(s.substr(5,2),16)]; }
+    return rgb(s); }
+  function lum(c){ var f=c.map(function(v){ v/=255;
+    return v<=0.03928? v/12.92 : Math.pow((v+0.055)/1.055,2.4); });
+    return 0.2126*f[0]+0.7152*f[1]+0.0722*f[2]; }
+  function ratio(fg,bg){ var a=lum(fg),b=lum(bg);
+    return +(((Math.max(a,b)+0.05)/(Math.min(a,b)+0.05))).toFixed(2); }
+
+  var HOSTS=["#hero-stats", "#stats", "#cd-stats"], TILE=".tile", LBL=".k", ALT=".comp-h", TAG=".tk", VAL=".v", BGVAR="--card";
+  var rootCs=getComputedStyle(document.documentElement);
+  var CARD=anyColor(rootCs.getPropertyValue(BGVAR))||null;
+  var out={vw:innerWidth, dpr:devicePixelRatio, err:null, groups:[]};
+  try{
+    HOSTS.forEach(function(sel){
+      var host=document.querySelector(sel); if(!host) return;
+      var tiles=[].slice.call(host.querySelectorAll(TILE));
+      var recs=[];
+      tiles.forEach(function(c){
+        var cs=getComputedStyle(c), cr=c.getBoundingClientRect();
+        var lblEl=ALT? (c.querySelector(ALT)||c.querySelector(LBL)) : c.querySelector(LBL);
+        if(!lblEl) return;
+        var tagEl=TAG? c.querySelector(TAG):null;
+        var li=ink(lblEl), ti=tagEl?ink(tagEl):null;
+        /* 大号数字（值锚点）量的是**行盒**，不是墨迹盒：墨迹是字形并集，受内容影响
+           （「8.6万」和「13.2小时」能差 5px），量出来的是字不是位置。 */
+        var vEl=VAL? c.querySelector(VAL):null;
+        var vr=vEl?vEl.getBoundingClientRect():null;
+        var cBot=cr.bottom-(parseFloat(cs.borderBottomWidth)||0)-parseFloat(cs.paddingBottom);
+        var fg=rgb(getComputedStyle(lblEl).color);
+        var bg=CARD||rgb(cs.backgroundColor);
+        recs.push({alt:!!(ALT&&lblEl.matches(ALT)),
+          tk:tagEl?tagEl.textContent.trim():'', lbl:lblEl.textContent.trim().slice(0,16),
+          val:vEl?vEl.textContent.trim().slice(0,12):'',
+          color:getComputedStyle(lblEl).color,
+          bw:+cr.width.toFixed(1),
+          size:parseFloat(getComputedStyle(lblEl).fontSize),
+          cardH:+cr.height.toFixed(1),
+          kTop:+(li.t-cr.top).toFixed(1),
+          tkTop:ti?+(ti.t-cr.top).toFixed(1):null,
+          dTop:ti?+((li.t-cr.top)-(ti.t-cr.top)).toFixed(1):null,
+          /* 值锚点：跨组要「和谐」就得让这两个数有共同取值 —— 卡片高度/下内边距/数值行盒
+             三个变量各写各的，数字必然错位（真实案例差 17px）。 */
+          vTop:vr?+(vr.top-cr.top).toFixed(1):null,
+          vBot:vr?+(cBot-vr.bottom).toFixed(1):null,
+          vH:vr?+vr.height.toFixed(1):null,
+          /* 内容盒左缘 = 边框盒左缘 + 左边框 + 左内边距（别写成减，会整组假报「左偏」） */
+          alignL:+(li.l-(cr.left+parseFloat(cs.borderLeftWidth)+parseFloat(cs.paddingLeft))).toFixed(1),
+          ratio:(fg&&bg)?ratio(fg,bg):null,
+          over:+(c.scrollWidth-c.clientWidth).toFixed(0)});
+      });
+      if(recs.length) out.groups.push({sel:sel, n:recs.length, tiles:recs});
+    });
+  }catch(e){ out.err=String(e&&e.stack||e); }
+  var pre=document.createElement('pre'); pre.id='EGEOM';
+  pre.style.display='none'; pre.textContent=JSON.stringify(out);
+  document.body.appendChild(pre);
+})();</script></body>
+</html>

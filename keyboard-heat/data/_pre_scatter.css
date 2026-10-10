@@ -1,0 +1,6 @@
+/* 「改前」夹具：铺砖但未聚类的散排布局（鼠标三块被键盘块插队、散在两行）。
+   双类 .tiles.tiles 提高特异性，确保覆盖页面内联的 .tiles 规则。 */
+.tiles.tiles{grid-template-areas:
+    "comp comp comp comp comp comp kb1 kb1 ms1 ms1 ms2 ms2"
+    "comp comp comp comp comp comp ms3 ms3 kb2 kb2 tm1 tm1"
+    "comp comp comp comp comp comp tm2 tm2 tm3 tm3 kb3 kb3"}

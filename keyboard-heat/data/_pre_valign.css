@@ -1,0 +1,9 @@
+/* 「大号数字错位」的改前夹具 —— 复现三处各自为政：
+   ① 卡高来路不同（总览 grid-auto-rows:88 定高；hero/倒计时由内容撑成 80/69）→ 去掉 min-height
+   ② hero 下内边距 19px、其余 15px
+   ③ 数值行盒随字号走（line-height:1.05），且单位继承行高、把「带单位」的卡撑得更高
+   注入后应复现 vTop 29 / 30 / 46（极差 17px），探针必须报红——证明判据不是死代码。 */
+.tile{min-height:0}
+.hero-stats .tile{padding:var(--padT) 17px 19px}
+.tile .v{line-height:1.05}
+.tile .v small{line-height:inherit}

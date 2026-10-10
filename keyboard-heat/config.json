@@ -1,0 +1,61 @@
+{
+  "_readme": "改完保存后重启程序生效。带 * 的是常用调参项。",
+  "heat": {
+    "*full_kpm": 300,
+    "_full_kpm": "多少等效活动算满热（100）。纯键盘约 300 KPM，纯用鼠标时也大致相当",
+    "*ema_alpha": 0.2,
+    "_ema_alpha": "平滑系数，越大反应越快但数字跳得越厉害。0.1 稳，0.4 灵敏",
+    "window_seconds": 60,
+    "idle_after_seconds": 30,
+    "_idle_after_seconds": "停止任何输入（键鼠都算）多少秒后开始降温",
+    "decay_per_second": 0.9,
+    "*w_move": 0.01,
+    "_w_move": "1 次鼠标移动折算成几次击键。移动事件极密集（每秒几百次），取 0.01 约等于 100 次移动 = 1 次击键",
+    "*w_click": 4,
+    "_w_click": "1 次鼠标点击折算成几次击键。点一下的心理操作量接近敲几个字",
+    "w_scroll": 2,
+    "_w_scroll": "1 格滚轮折算成几次击键"
+  },
+  "mouse": {
+    "*enabled": true,
+    "_enabled": "false 则完全不监听鼠标 —— 零开销，热度只剩键盘打字",
+    "pump_interval_seconds": 2,
+    "_pump_interval_seconds": "多久把累计的鼠标计数批量交给聚合器。调小更实时，但锁竞争更频繁"
+  },
+  "overlay": {
+    "*size": 190,
+    "*position": "bottom-right",
+    "_position": "可选 bottom-right / bottom-left / top-right / top-left",
+    "*bg_alpha": 0.0,
+    "_bg_alpha": "底盘不透明度 0~1（**内部值**）。托盘菜单里显示的是**透明度** = 1 − 这个值：透明度 0% 最实、100% 全透明（所以菜单里 100% 就是看不见）。只影响底盘和外框 —— 圆环（轨道 + 进度弧）是定色的，调多低都看得清；盘中央的文字有反相描边光晕，底盘透明到多少都读得清。篝火模式下灶膛（火底下那块暗底）另有下限，不会被调透明。环带轮廓那条线的不透明度与它**反相**（= 1 − bg_alpha）：底盘越实线越淡，调到 100% 时线完全消失（那时盘面自己就和轨道差 54，不需要它）",
+    "theme": "dark",
+    "_theme": "dark 深色盘（浅色桌面上更醒目）/ light 浅色盘",
+    "screen": 0,
+    "_screen": "多显示器时用哪个屏幕，0 是主屏",
+    "margin": 28,
+    "refresh_ms": 250,
+    "campfire": true,
+    "*log_style": "charred",
+    "_log_style": "木柴质感：charred 树皮纹+柴尖碳化（默认）/ bark 树皮纹 / gnarled 扭曲节疤 / flat 素面",
+    "*log_image": "assets/log-pile.png",
+    "_log_image": "后景柴堆 PNG（相对项目根目录），画在火焰**后面**；留空 = 代码绘制柴塔。位图柴堆不随热度烧红/炭化",
+    "*log_image_front": "assets/log-pile-front.png",
+    "_log_image_front": "前景柴堆 PNG（相对项目根目录），画在火焰**前面** —— 压住火焰下半段和那条平直的底边；留空 = 用代码画前对柴 + 端向柴",
+    "*flame_floor": true,
+    "_flame_floor": "底火层：跨度固定的一层暗火，低热时也压住柴堆的炭化黑尖（挂在起火点上，跨度按贴图内容包围盒自动算，见 flame.FLAME_FLOOR_*）。false 则火苗缩小时柴尖会整根露出来",
+    "bg_alpha": 0.0,
+    "position": "bottom-right",
+    "tray_double_click": "cd5",
+    "tray_single_click": "open_stats"
+  },
+  "storage": {
+    "db_path": "data/heat.db",
+    "flush_interval_seconds": 5
+  },
+  "report": {
+    "output": "data/heat-report.html",
+    "*keep_days": 120,
+    "_keep_days": "报告里保留最近多少天的数据",
+    "auto_open": false
+  }
+}
