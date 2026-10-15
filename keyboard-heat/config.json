@@ -24,14 +24,16 @@
   },
   "overlay": {
     "*size": 190,
-    "*position": "bottom-right",
+    "*position": "top-right",
     "_position": "可选 bottom-right / bottom-left / top-right / top-left",
     "*bg_alpha": 0.0,
     "_bg_alpha": "底盘不透明度 0~1（**内部值**）。托盘菜单里显示的是**透明度** = 1 − 这个值：透明度 0% 最实、100% 全透明（所以菜单里 100% 就是看不见）。只影响底盘和外框 —— 圆环（轨道 + 进度弧）是定色的，调多低都看得清；盘中央的文字有反相描边光晕，底盘透明到多少都读得清。篝火模式下灶膛（火底下那块暗底）另有下限，不会被调透明。环带轮廓那条线的不透明度与它**反相**（= 1 − bg_alpha）：底盘越实线越淡，调到 100% 时线完全消失（那时盘面自己就和轨道差 54，不需要它）",
     "theme": "dark",
     "_theme": "dark 深色盘（浅色桌面上更醒目）/ light 浅色盘",
-    "screen": 0,
+    "screen": 1,
     "_screen": "多显示器时用哪个屏幕，0 是主屏",
+    "*hide_on_hover": "on",
+    "_hide_on_hover": "鼠标悬停时是否隐藏表盘：off = 始终显示（默认）/ on = 鼠标一进入表盘就隐藏、移开自动恢复（这样表盘不会挡住下面的内容）。表盘平时是鼠标穿透的，本项用 Win32 的 TrackMouseEvent 追踪进入/离开，不影响单击/双击。与托盘「隐藏表盘」是两条独立的隐藏路径：手动隐藏期间，鼠标移开不会把它显示出来。",
     "margin": 28,
     "refresh_ms": 250,
     "campfire": true,
@@ -44,9 +46,10 @@
     "*flame_floor": true,
     "_flame_floor": "底火层：跨度固定的一层暗火，低热时也压住柴堆的炭化黑尖（挂在起火点上，跨度按贴图内容包围盒自动算，见 flame.FLAME_FLOOR_*）。false 则火苗缩小时柴尖会整根露出来",
     "bg_alpha": 0.0,
-    "position": "bottom-right",
+    "position": "top-right",
     "tray_double_click": "cd5",
-    "tray_single_click": "open_stats"
+    "tray_single_click": "open_stats",
+    "hide_on_hover": "on"
   },
   "storage": {
     "db_path": "data/heat.db",

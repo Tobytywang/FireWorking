@@ -215,6 +215,13 @@ SINGLECLK_ENTRIES = [
 # 采集和热度是同一套，切换的只是渲染；写回 config 的 "campfire" 键。
 CAMPFIRE_ENTRIES = [("篝火", True), ("数字", False)]
 
+# 「鼠标悬停时隐藏表盘」的档位。**默认「关」** —— 不改变既有行为，用户主动开启。
+#   off：始终显示（默认）
+#   on ：鼠标一进入表盘就隐藏，移开后自动恢复
+#做成**单选**而不是 checkable 开关，是为了和旁边「表盘样式」「透明度」等保持同一种
+# 交互（build_choice_menu 统一管互斥与勾选回写），也便于以后加中间档（如「淡化」）。
+HOVER_ENTRIES = [("关", "off"), ("悬停时隐藏", "on")]
+
 # 单击去抖阈值：单击后等这么久才执行，给双击留出识别窗口；期间来双击就取消单击、
 # 改执行双击动作。Windows 默认双击阈值约 500ms，取一半稍小；对快捷键（开面板 /
 # 开始倒计时）这点延迟几乎无感，却能避免双击被拆成两次单击触发。
@@ -393,6 +400,11 @@ class HeatDial(QWidget):
         self._theme = THEMES.get(cfg_get(cfg, "theme", "dark"), THEMES["dark"])
         self._bg_alpha = int(max(0.0, min(1.0, float(cfg_get(cfg, "bg_alpha", 0.72)))) * 255)
         self._campfire = bool(cfg_get(cfg, "campfire", True))
+        # 「悬停时隐藏表盘」：默认 off（不改变既有行为，用户在托盘里主动开启）。
+        self._hover_hide = str(cfg_get(cfg, "hide_on_hover", "off")) == "on"
+        self._hover_hidden = False# 因悬停而隐藏（与「手动隐藏」分开记）
+        self._manually_hidden = False   # 因托盘「隐藏表盘」而隐藏
+        self._tracking_mouse = False    # 保留字段（历史命名），当前实现不再需要原生订阅
         # 木柴样式（flat / bark / charred / gnarled），见 flame.LOG_STYLES
         self._log_style = str(cfg_get(cfg, "log_style", flame.LOG_STYLE_DEFAULT))
         # 位图柴堆（相对项目根目录的 PNG 路径；空 = 代码绘制三对柴塔 + 端向柴）。
@@ -453,6 +465,11 @@ class HeatDial(QWidget):
         self._topmost_timer = QTimer(self)
         self._topmost_timer.timeout.connect(self._enforce_topmost)
         self._topmost_timer.start(1000)
+        # 悬停轮询：只有开启「悬停时隐藏表盘」时才跑（默认关 → 定时器不启动，零开销）。
+        # 间隔 100ms：足够跟手，又不至于像刷新循环那样频繁查询光标位置。
+        self._hover_timer = QTimer(self)
+        self._hover_timer.timeout.connect(self._poll_hover)
+        self._sync_hover_timer()
         self._preload_log_images()     # 后台线程预加载柴堆 PNG，首帧不再同步解码（~232ms）
 
     def _preload_log_images(self):
@@ -591,6 +608,11 @@ class HeatDial(QWidget):
         cf_acts = getattr(self, "_campfire_acts", None)
         if cf_acts:
             sync_choice_checks(cf_acts, CAMPFIRE_ENTRIES, self._campfire)
+        hv_acts = getattr(self, "_hover_acts", None)
+        if hv_acts:
+            sync_choice_checks(
+                hv_acts, HOVER_ENTRIES,
+                cfg_get(self._overlay_cfg, "hide_on_hover", "off"))
         scn_acts = getattr(self, "_screen_acts", None)
         if scn_acts:
             sync_choice_checks(scn_acts, self._screen_entries,
@@ -647,6 +669,14 @@ class HeatDial(QWidget):
         _sub, self._campfire_acts, self._campfire_group = build_choice_menu(
             self, menu, "表盘样式", CAMPFIRE_ENTRIES, self._campfire,
             self._set_campfire)
+
+        # 「鼠标悬停时隐藏表盘」：单选子菜单（关 / 悬停时隐藏），默认「关」= 不改变既有行为。
+        # 放在「隐藏表盘」**上方**：两者都是「让表盘别碍事」的手段，挨在一起才成组；
+        # 且「隐藏表盘」是组内最后一个（用户此前明确要求它置于位置/透明度/样式之下）。
+        _sub, self._hover_acts, self._hover_group = build_choice_menu(
+            self, menu, "鼠标悬停时", HOVER_ENTRIES,
+            cfg_get(self._overlay_cfg, "hide_on_hover", "off"),
+            self._set_hover_hide)
 
         # 隐藏表盘：纯隐藏 / 显示前台界面（不暂停数据采集）。勾选 = 隐藏，取消 = 显示。
         # 放在「停靠位置 / 透明度 / 表盘样式」这一组的**最下面**（用户要求：与这三者同组、
@@ -796,10 +826,107 @@ class HeatDial(QWidget):
 
         勾选 = 隐藏窗口（托盘图标仍在，数据采集继续）；取消勾选 = 显示窗口。
         这是「暂停记录」的替代：用户要的是「不显示界面」而非「停止记录」。
+
+        ⚠ 与「悬停隐藏」共用同一个可见性开关：手动隐藏期间不接受悬停恢复
+          （_hover_hidden 与setHidden 是两条独立的隐藏路径，见 _apply_hover）。
         """
         hidden = self._act_hide_dial.isChecked()
+        self._manually_hidden = hidden
+        if hidden:
+            self._hover_hidden = False
+        else:
+            self._restore_after_hover()
+        self.setHidden(hidden)
+        self._sync_tray_checks()
+        self.update()
+
+    # ---------------- 悬停隐藏 ----------------
+    def _cursor_on_dial(self):
+        """鼠标是否落在表盘矩形内。
+
+        为什么不用 Qt 的 enterEvent/leaveEvent：窗口旗标含
+        `WindowTransparentForInput`（鼠标穿透），Qt 根本收不到指针事件。
+        为什么不用 Win32 的 WM_MOUSEENTER/WM_MOUSELEAVE + nativeEvent：
+        PyQt6 传进来的 `message` 是 **PyCapsule**，用 `int()` 当指针、
+        再 `MSG.from_address()` 解释，会按错误的结构体布局读原生内存 ——
+        实测直接 **0xC0000409（栈缓冲区溢出）秒退**，且 Python 层连
+        error.log 都写不出来（崩溃在原生层）。风险与收益完全不成比例。
+        → 采用**几何判断**：读QCursor 的全局坐标，和表盘的全局矩形比对。
+          不碰任何原生指针，纯 Qt API，不可能崩。
+        表盘被拖动/改位置后矩形随之变化（Qt 自动更新），故不需要额外同步。
+        """
+        try:
+            global_rect = self.frameGeometry()      # 含边框的全局矩形
+            return global_rect.contains(QCursor.pos())
+        except Exception:
+            return False
+
+    def _poll_hover(self):
+        """轮询鼠标是否在表盘上：进入则隐藏、离开则恢复。
+
+        挂在已有刷新定时器之外单独跑（_hover_timer），因为关闭本功能时
+        _refresh 的间隔会变，且表盘隐藏时也要继续轮询才能恢复显示。
+        """
+        if not self._hover_hide:
+            return
+        if self._manually_hidden:
+            return                       # 手动隐藏中：不参与，交给菜单项
+        on = self._cursor_on_dial()
+        if on and not self._hover_hidden:
+            self._hover_hidden = True
+            self._apply_hover(True)
+        elif not on and self._hover_hidden:
+            self._hover_hidden = False
+            self._apply_hover(False)
+
+    def _set_hover_hide(self, value):
+        """「鼠标悬停时隐藏表盘」：on = 进入即隐藏；off = 始终显示。"""
+        cfg_set(self._overlay_cfg, "hide_on_hover", value)
+        self._hover_hide = (value == "on")
+        save_config(self._service.config)
+        self._sync_hover_timer()
+        if not self._hover_hide:
+            self._restore_after_hover()
+        self._sync_tray_checks()
+
+    def _sync_hover_timer(self):
+        """按开关起停轮询定时器。关闭时不跑 —— 零开销、不改变既有行为。"""
+        if not hasattr(self, "_hover_timer"):
+            return
+        if self._hover_hide and not self._hover_timer.isActive():
+            self._hover_timer.start()
+        elif not self._hover_hide and self._hover_timer.isActive():
+            self._hover_timer.stop()
+
+    def _on_mouse_leave(self):
+        """鼠标离开表盘：若此前是「悬停隐藏」藏起来的，这里恢复显示。
+
+        保留这个方法是为了让状态流转仍可被探针直接驱动（`_poll_hover` 内部
+        走的是同一套判断，不经过它）。
+        """
+        if self._hover_hidden:
+            self._hover_hidden = False
+            if not self._manually_hidden:
+                self._apply_hover(False)
+
+    def _on_mouse_enter(self):
+        """鼠标进入表盘：开启「悬停隐藏」时立即藏起来。"""
+        if self._hover_hide and not self._manually_hidden and not self._hover_hidden:
+            self._hover_hidden = True
+            self._apply_hover(True)
+
+    def _apply_hover(self, hidden):
+        """真正执行隐藏/恢复。与「隐藏表盘」菜单项共用 setHidden，
+        但各自维护自己的标志位，互不覆盖对方的意图。"""
         self.setHidden(hidden)
         self.update()
+
+    def _restore_after_hover(self):
+        """从「悬停隐藏」恢复：仅当没有手动隐藏时才显示出来。"""
+        if self._hover_hidden:
+            self._hover_hidden = False
+            if not self._manually_hidden:
+                self._apply_hover(False)
 
     def _stop_countdown(self):
         """停止计时（顶层动作「停止计时」）：清掉进行中 / 已触发的倒计时与提示。
@@ -1252,6 +1379,7 @@ def run():
     dial = HeatDial(service)
     dial.show()
     dial._enforce_topmost()   # 启动即声明一次置顶，不等看门狗第一拍
+    # 「悬停时隐藏表盘」的轮询在 __init__ 里已按开关起停（默认关 → 不跑）。
 
     return app.exec()
 
