@@ -769,8 +769,23 @@ powershell -ExecutionPolicy Bypass -File autostart.ps1 -Remove  # 关闭
 
 **打包成单个 exe**（不依赖 Python 环境）
 ```bat
-.pyenv\Scripts\python.exe -m pip install pyinstaller
-.pyenv\Scripts\pyinstaller --noconsole --onefile --name 键盘热度 --add-data "config.json;." --add-data "report_template.html;." main.py
+.pyenv\Scripts\python.exe build.py
+```
+产物名**带版本号**：`dist\键盘热度-v1.2.0.exe`。版本号只有一个来源 —— `version.py`
+的 `VERSION`；`键盘热度.spec` 从那里取名字，托盘 tooltip 也显示同一份，所以
+**文件名的版本和程序里显示的版本永远一致**。改版本只需改 `version.py` 一处。
+
+`build.py` 还会自动把 `BUILD_DATE` 写成当天、并在打完时列出 `dist/` 全部产物及时间
+（最新的标「本次打包」，旧的标「可回退」）。**不要删旧 exe**：文件名带版本号后它们
+天然不会互相覆盖，新版有问题直接换回旧版即可。
+
+> 为什么坚持带版本号：开发期反复打包，旧产物可能带已知缺陷 —— 2026-10-15之前
+> 那份一旦双击就 `0xC0000409` 秒退（原生层崩溃，`error.log` 都不会有记录），
+> 文件名不带版本时根本分不清手上跑的是哪一份。
+
+底层命令（`build.py` 就是它的一次包装，正常用 `build.py` 即可）：
+```bat
+.pyenv\Scripts\python.exe -m PyInstaller --noconfirm 键盘热度.spec
 ```
 
 **双击了但没反应 / 看不到悬浮窗**

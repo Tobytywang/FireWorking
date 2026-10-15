@@ -35,4 +35,9 @@ generated-images/
 # ===== PyInstaller 构建产物 =====
 dist/
 build/
+# ⚠ 只忽略 PyInstaller **自动生成**的 spec（重新生成时会带绝对路径、本机状态，
+#   不该入库）；**手工维护的 `keyboard-heat/键盘热度.spec` 必须入库** ——
+#   它是打包的入口配置，漏了它换台机器就完全没法打包。
+#   （真实踩过：`*.spec` 这条规则把它一起吞了，仓库里从没有过这个文件。）
 *.spec
+!keyboard-heat/键盘热度.spec

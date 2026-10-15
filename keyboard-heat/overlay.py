@@ -43,6 +43,13 @@ from heatcore import (
 )
 import flame
 
+# 版本标识（唯一数据源见version.py；打包产物名也由它决定 → 名字与托盘显示永远一致）
+try:
+    from version import full_version as _full_version
+except Exception:      # 源码树外/被裁剪时不应因版本标签崩掉整个程序
+    _full_version = lambda: "键盘热度"
+_VERSION_LABEL = _full_version()
+
 START_DEG = 220.0          # 弧起点角度，左下 7 点半方向
 SWEEP_DEG = 260.0          # 顺时针扫过的角度，缺口留在正下方
 
@@ -622,7 +629,7 @@ class HeatDial(QWidget):
 
     def _build_tray(self):
         self._tray = QSystemTrayIcon(dial_icon(), self)
-        self._tray.setToolTip("键盘热度")
+        self._tray.setToolTip(_VERSION_LABEL)
         self._tray.activated.connect(self._on_tray_activated)
 
         menu = QMenu()
@@ -1020,7 +1027,10 @@ class HeatDial(QWidget):
         self._last_t = now
         self._snap = self._service.snapshot()
         # 篝火模式屏幕上没有数字，精确读数挂到托盘 tooltip 上 —— 鼠标悬停就能看
-        tip = "键盘热度 · %d %s · %s" % (
+        # 前缀带版本号：打包产物名已带版本，这里再带一次是为了**双击 exe 后不看
+        # 文件名也能确认跑的是哪一版**（开发期常有多个版本的 exe 并列）。
+        tip = "%s · %d %s · %s" % (
+            _VERSION_LABEL,
             self._snap.get("kpm", 0),
             HEAT_UNIT,
             STATE_LABEL.get(self._snap.get("state", "idle"), ""),
