@@ -126,19 +126,48 @@ h2 span{color:var(--fg3);font-weight:400;font-size:12.5px;letter-spacing:0}
   .hero-stats .tile.wide .v{order:2;margin-top:auto}
 }
 
-/* 总览：铺地砖式语义排布 —— 砖块大小不一、不强行同行列对齐；
-   排布语义（用户指定）：三「行」= 三组 —— 键盘行 / 鼠标行 / 时间行。
+/* 总览：铺地砖式语义排布 —— 砖块大小按**语义关系**分配，不强行同行列对齐；
+   前两「行」= 键盘行 / 鼠标行。
    主砖「输入构成」（键盘/鼠标占比）**同属键盘行与鼠标行**，
-   故置于右侧、**纵向横跨这两行**（两行的行末），一眼读出「它同时属于这两行」；
-   时间行是独立维度，单独一行铺在底部（三块较宽、铺满整宽）。
-   每块顶部色条+右上角标=主题色（键盘冷蓝 / 鼠标暖橙 / 时间绿），自由排布下仍可读出聚类。
+   故置于右侧、**纵向横跨这两行**（两行的行末），一眼读出「它同时属于这两行」。
+   底部三排是时间维度，**分组的依据是「谁和谁有对照关系」**（v3.15）：
+     ① 概览排 g1-g3：无「标准/实际」对照对象，其中「日均活跃」代表整体强度 → 给 6/12 大砖；
+     ② 对照排 s1-s3（标准侧）与 a1-a3（实际侧）：**逐列严格对齐**，同一列 = 同一维度
+        （工作时长↔工作时长、活跃时长↔活跃时长、活跃占比↔活跃占比），两排相接即可横向比读；
+     ③ 加班 ot（12/12 满宽）：承接对照区的第三类时间。
+   ⚠ 每块新砖的 `--a` 区域名**都必须在上面 `grid-template-areas` 里有定义**：
+     引用不存在的命名区域时 Chrome 不会回退成 auto，而是开幻影轨道把砖压扁、整段错位。
+   每块顶部色条+右上角标=主题色（键盘冷蓝 / 鼠标暖橙 / 时间绿），自由排布下仍可读出聚类；
+   对照区与加班的角标直接写「标准 / 实际 / 加班」，让分组不必靠位置去猜。
    主砖的顶色条是「键盘蓝 → 鼠标橙」**撞色渐变**（它同时属于两类）；
    全部砖共用**同一套文字位置**：标签在左上、数值在左下——主砖亦然。 */
 .tiles{display:grid;grid-template-columns:repeat(12,1fr);grid-auto-rows:88px;gap:12px;
   grid-template-areas:
     "kb1 kb1 kb2 kb2 kb3 kb3 comp comp comp comp comp comp"
     "ms1 ms1 ms2 ms2 ms3 ms3 comp comp comp comp comp comp"
-    "tm1 tm1 tm1 tm1 tm2 tm2 tm2 tm2 tm3 tm3 tm3 tm3"}
+    "g1 g1 g1 g1 g2 g2 g2 g2 g3 g3 ot ot"
+    "s1 s1 s1 s1 s2 s2 s2 s2 s3 s3 s3 s3"
+    "a1 a1 a1 a1 a2 a2 a2 a2 a3 a3 a3 a3"}
+/* 第3 排（概览排）的排布说明：
+   「加班时长」与概览层的其他量**同排**而不是独占一行。理由是实测结论（见下）：
+   在当前 areas + `grid-area:var(--a)` 的机制下，让某个砖**独占整行**时它的横向位置不可控——
+     · 区域名重复 12 格 → Chrome 退化成 auto 放置（内容宽、居中偏左，右侧空一大片 → 「突兀」）；
+     · 点号/假名占位 → 被压成 2/12；
+     · `grid-column` / `grid-area` / `!important` 各种写法 → **全都无效**
+       （`grid-area:var(--a)` 里的 `var()` 在样式计算时解析，压过 `!important` 作者样式）。
+   既然「独占一行」做不出满宽，就让它**左右有别的砖**：加班落在概览排最右列，
+   左侧紧邻「最热一天」，视觉上是一组「全周期/峰值/超时」的横向序列，不再悬空。 */
+/* 第 6 排（加班行）的实测结论 —— 这条试了很多写法，务必先读再改：
+   ⚠ `ot` 在本行**必须重复满 12 格**才稳定：写成`ot ot ot ot nd nd …`（用假区域名 nd 占位）
+     Chrome 会把 ot 当孤儿区域 → 渲染成 2/12 宽（实测 x=198 w=158）；
+     写成 `ot ot ot ot . . . . . . . .`（点号占位）同样被压成 2/12（x=198 w=158）。
+   ⚠ 但满 12 格时它**不会真的满 12 列宽**：Chrome 让这种「单行重复」的命名区域退化成
+     auto 放置 → 砖按内容宽缩在行内居中（实测 x=392 w=480，host 宽 1052）。
+     试过 grid-column:1/-1、grid-area:6/1/7/-1、grid-row+grid-column，均无效——
+     `.tile{grid-area:var(--a)}` 是简写属性会重置列，且写死行号会因 comp 跨行而错位。
+   → 结论：**放弃「满宽横贯」这个形态**（在当前 areas 机制下不可靠）。
+     改为把加班砖**宽度交给内容**、但让它在视觉上贴住左缘、不再悬在中间：
+     见下方 `.tiles .tile.full`（用 margin-right:auto 把内容拉回左缘 + 加一条左侧色带标识它是附属量）。 */
 /* --padT = 卡片「头条基线」：标题与右上角标**由同一个数推出**（.tk 用 top:var(--padT)），
    于是两者墨迹顶边天然同线；想让头条更贴 TOP 或更松，只改这一个数，不会再错行。
    各组只改左右的 padding，纵向用 var(--padT) + 下内边距保持总高不变。 */
@@ -168,6 +197,40 @@ h2 span{color:var(--fg3);font-weight:400;font-size:12.5px;letter-spacing:0}
    还低 7px，把整行撑高（实测带单位的卡 vH 38–40、不带的 34 → 数字位置差 5px）。
    收成 line-height:1 后行盒回到 34px，带不带单位都不再影响数字位置。 */
 .tile .v small{font-size:11px;font-weight:500;color:var(--fg3);margin-left:3px;line-height:1}
+/* 时间行窄砖的「数值 + 次要小字」容器：把 .v 与 .sub 收成一组，随 .tile 的
+   space-between 一起贴底；.sub 只占一行（10.5px），不顶动 .v 的 34px 行盒。 */
+.tile .vbox{display:flex;flex-direction:column;gap:1px}
+.tile .sub{font-size:10.5px;color:var(--fg3);line-height:1.2;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+/* 概览组的「大砖」（日均活跃）：无对照对象、代表整体强度，用更大的字重与字号凸显层级。
+   它的小字要完整显示（口径说明较长），故允许折行、不做 ellipsis。 */
+.tile.big .v{font-size:32px}
+.tile.big .k{font-size:13px;font-weight:600}
+.tile.big .sub{white-space:normal;line-height:1.35;text-overflow:clip}
+/* 标准侧 / 实际侧 / 加班：角标直接写组名（`.tk` 的内容），让「谁和谁对照」在砖上就说得清，
+   不必靠位置去猜；颜色仍用时间族的绿，保持与键盘蓝/鼠标橙的区分。 */
+.tile[data-tk="标准"] .tk,.tile[data-tk="实际"] .tk,.tile[data-tk="加班"] .tk{
+  background:color-mix(in srgb,var(--tm) 16%,transparent);color:var(--tm);
+  border-radius:5px;padding:1px 5px;right:10px}
+/* 满宽砖（加班）：小字口径较长，允许折行铺满整行，避免被 ellipsis 截断 */
+.tile.wrap .sub{white-space:normal;line-height:1.35;text-overflow:clip}
+/* 加班砖：放在对照区**第 1 列下方**，与 a1「实际工作时长」同列、同 4/12 宽。
+   语义依据：加班 = 实际工作时长中落在标准窗口外的部分，是 a1 的**子集**而非另一组量；
+   同列对齐即表达「它从属于实际工作时长这一列」，比"满宽横贯"更贴合这层关系。
+   ⚠ 为什么不用满宽：实测 `grid-template-areas` 里把区域名单行重复 12 次（如`ot ot ot …×12`），
+     Chrome 会让这种命名区域退化成 auto 放置 —— 砖按内容宽（~480px）缩在中间、右侧留一大片
+     空白，看着孤零零（用户截图指出的「突兀」）。试过 grid-column:1/-1、grid-area:6/1/7/-1、
+     grid-row+grid-column 各种写法均被`.tile{grid-area:var(--a)}` 的简写重置或排到错误的行。
+   ⚠ 第 6 排右侧 8 列用 `.` 留空：点号在**已声明的命名区域所在行**里是有效的
+     （与「用点号制造错位」那种无效场景不同 —— 那里点号行的区域名未被声明）。 */
+/* 加班砖：与概览层同排（见 areas 处说明：「独占整行」的形态在当前机制下做不出满宽）。
+   它比同排其他砖多一层语义（是实际工作时长的附属量），用左侧色带 + 半透明顶条
+   表明层级从属，避免与概览量平级混淆。 */
+.tiles .tile.full::after{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:var(--tm);opacity:.5;border-radius:14px 0 0 14px}
+/* 加班砖的小字比其他砖长（它是「实际工作时长里超出窗口的部分」），允许折两行，
+   但仍受 88px 卡高约束 —— 故字号比常规 .sub 略小、行高更紧。 */
+.tiles .tile.full .sub{white-space:normal;line-height:1.25;font-size:10px}
 /* 时间行三块较宽 → 横向：左列「标签(上)/数值(下)」与其余 6 块**同一套文字位置**（左缘对齐），
    右列补一条同源推导的次要信息把宽度用掉；不再用 space-between 把标签与数值推到两端留出中缝。 */
 .tile.wide{flex-direction:row;align-items:stretch;justify-content:space-between;gap:16px}
@@ -220,6 +283,12 @@ h2 span{color:var(--fg3);font-weight:400;font-size:12.5px;letter-spacing:0}
   .tiles .tile.wide .wmain{display:contents}
   .tiles .tile.wide .wside{order:1;display:block;white-space:normal;padding-bottom:0;line-height:1}
   .tiles .tile.wide .v{order:2;margin-top:auto}
+  /* 窄屏下所有 .sub 变体（大砖 .big 的折行、满宽 .wrap 的折行）一律**收回单行**：
+     卡高只有 92px，折行会把大号数值顶上去、或被 overflow:hidden 裁掉（实测 g1/ot 越框）。
+     收成 nowrap 后超宽走省略号 —— 窄屏本来就是「看趋势」的档位，口径全文在宽屏与说明段里。 */
+  .tile .sub,.tile.big .sub,.tile.wrap .sub{white-space:nowrap;line-height:1.2;text-overflow:ellipsis}
+  .tile.big .v{font-size:24px}
+  .tile.big .k{font-size:12px}
   .donuts{gap:12px;margin:6px 0}
   .donut{width:96px;height:96px}
 }
@@ -321,14 +390,29 @@ h2 span{color:var(--fg3);font-weight:400;font-size:12.5px;letter-spacing:0}
 .bar.off{background:var(--line-soft)}
 .bar-m{position:absolute;left:0;right:0;bottom:0;background:var(--mouse);opacity:.95}
 .bar.off .bar-m{display:none}
-/* 每格**两根柱**：左 = 当天（实色，鼠标段叠在底部）、右 = 全周期同时段平均（浅色同色相）。
-   参考柱是"典型一天"的轮廓，把当天没活动的小时也填上 —— 用户反馈的"太空了"正是这一片。
-   ⚠ 两根必须**共用同一条刻度**（JS 里 mx 取当天峰值与平均峰值的大者）：各用各的 max
-     会让两根都永远顶格，参考就白加了；这条有探针自洽校验（`hourRef.rel`）。 */
-.bh{align-self:stretch;display:flex;align-items:flex-end;gap:2px}
-.bh .bar{flex:1 1 0;min-width:0}
+/* 每格**同轴两层**（v3.12 起）：
+     底层 = 工作日同时段平均（浅色柱，占满格宽）——"典型工作日"的轮廓（剔除周末与法定假期，含调休补班），把当天没活动的小时也填上，
+            用户反馈的"太空了"正是这一片；
+     上层 = 当天，不再是柱，而是**与平均柱同轴的一条竖线 + 顶端菱形**（菱形中心 = 当天数值位置）。
+   两层水平居中对齐（线 left:50%），所以纵向刻度是同一条轴、横向位置也是同一条轴。
+   ⚠ 两者必须**共用同一条刻度**（JS 里 mx 取当天峰值与平均峰值的大者）：各用各的 max
+     会让两者都永远顶格/顶线，参考就白加了；这条有探针自洽校验（`hourRef.rel`）。 */
+.bh{align-self:stretch;position:relative}
+/* 平均柱绝对定位贴底：父 .bh 已被 align-self:stretch 撑到 170px 的格高，柱高按 pct 从底往上算 */
+.bh>.bar{position:absolute;left:0;right:0;bottom:0}
 .bar-avg{background:var(--accent-2);opacity:.28}
 .bar-avg:hover{opacity:.42}
+/* 当天竖线。⚠ 千万不要给它 overflow:hidden —— 菱形要探出线的顶端 4.5px，会被裁掉。 */
+.dline{position:absolute;bottom:0;left:50%;width:3px;transform:translateX(-50%);
+  background:var(--accent-2);transition:.15s}
+/* 线本身只有 3px 宽，hover 命中太小：用透明的伪元素把「当天」的热区撑到左右各 ±8px。
+   伪元素的命中算在 .dline 头上，所以 title 挂在 .dline 上仍生效（伪元素不能带 title）。 */
+.dline::before{content:"";position:absolute;left:-8px;right:-8px;top:-8px;bottom:0}
+.dline:hover{opacity:.8}
+/* 菱形尖端：top:0 + translate(-50%,-50%) ⇒ 菱形的**中心**压在线顶 = 当天数值位置。
+   ⚠ 用 clip-path 而不是 rotate(45deg)：rotate 会让 9px 的盒子抖出半像素毛边。 */
+.dline>.dl-tip{position:absolute;left:50%;top:0;width:9px;height:9px;
+  transform:translate(-50%,-50%);clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%)}
 .bar-x{display:grid;grid-template-columns:repeat(24,1fr);gap:5px;margin-top:8px}
 .bar-x div{text-align:center;font-size:10.5px;color:var(--fg3);font-family:Consolas,monospace}
 .bar-x div.hide{visibility:hidden}
@@ -391,6 +475,17 @@ a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   <section>
     <h2>总览 <span>铺地砖式排布：位置即信息，大小即分量</span></h2>
     <div class="tiles" id="stats"></div>
+    <p class="note">
+      排布按<b>语义关系</b>分组：无对照关系的概览量（日均活跃 / 活跃时长 / 最热一天）单独成组；
+      「标准」与「实际」两组<b>逐列对齐</b>构成严格对照（工作时长↔工作时长、活跃时长↔活跃时长、活跃占比↔活跃占比）；
+      加班时长横贯一行。<br>
+      口径：<b>活跃时长</b>（= 全时段实际活跃时长）= 相邻输入事件间隔 &lt; 3 秒的时间累加（间隔 ≥ 3 秒视为停顿，不计入，与悬浮窗同算法）；
+      <b>日均活跃</b> = 工作日「击键数 + 鼠标当量」合计 ÷ 工作日天数；
+      <b>标准工作窗口</b> = 9:00–12:00 与 13:30–18:00，即 7.5 小时/工作日；<b>标准工作时长</b> = 工作日数 × 7.5 小时（固定常数）；
+      <b>标准活跃时长</b> = 落在该窗口内的活跃秒；<b>实际工作时长</b> = 每日「首次~末次有活动分钟」跨度之和；
+      <b>加班时长</b> = 实际工作跨度中落在标准窗口「外」的部分（注意：<b>不等于</b>「实际工作 − 标准工作」——午休等窗口内无活动的分钟计入跨度但不计入加班）；
+      <b>两类活跃占比</b> = 对应的活跃时长 ÷ 对应的工作时长。除「最热一天」外，全部指标仅统计工作日（含调休补班）。
+    </p>
   </section>
 
   <section>
@@ -409,7 +504,7 @@ a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
     </div>
     <div class="panel" id="day-card">
       <div class="row"><span class="title">当天逐小时分布</span>
-        <span class="meta">按小时综合活跃（键盘+鼠标折算），浅色=全周期同时段平均（刻度固定）</span></div>
+        <span class="meta">按小时综合活跃（键盘+鼠标折算）：浅色柱=工作日同时段平均（剔除周末与法定假期，含调休补班），竖线+菱形=当天值（刻度固定）</span></div>
       <div class="day-nav" id="day-nav">
         <button id="day-prev">前一天</button>
         <div class="day-info" id="day-info">
@@ -421,7 +516,7 @@ a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
       <div class="bars" id="bars"></div>
       <div class="bar-x" id="bar-x"></div>
       <div class="legend"><i style="background:var(--accent-2)"></i><span>当天</span>
-        <i style="background:var(--accent-2);opacity:.28"></i><span>历史同时段平均</span>
+        <i style="background:var(--accent-2);opacity:.28"></i><span>工作日同时段平均</span>
         <i style="background:var(--mouse)"></i><span>其中鼠标</span>
         <span style="margin-left:10px">悬停看该小时明细</span></div>
     </div>
@@ -467,6 +562,28 @@ const W_MOVE=0.01,W_CLICK=4,W_SCROLL=2;
 const mouseEquiv = (r) => r[4]*W_MOVE+r[5]*W_CLICK+r[6]*W_SCROLL;
 const fmtShort = (n) => n>=10000 ? (n/10000).toFixed(1)+'万' : fmt(n);
 
+/* 中国法定节假日 / 调休补班表（国办每年公告，无法用算法推算，必须手动维护）。
+   当前覆盖 2026（国办 2025-11-04 公告）。未收录的年份回退「周一~周五=工作日」。
+   ⚠ 这是「只统计工作日」的唯一真值来源：逐小时平均柱 与 日均汇总指标 都经它过滤。 */
+const HOLIDAY_2026=[];
+(function(){ const rng=[['2026-01-01','2026-01-03'],['2026-02-15','2026-02-23'],['2026-04-04','2026-04-06'],
+  ['2026-05-01','2026-05-05'],['2026-06-19','2026-06-21'],['2026-09-25','2026-09-27'],['2026-10-01','2026-10-07']];
+  const step=864e5;
+  for(const a of rng){ let t=parseD(a[0]).getTime(); const e=parseD(a[1]).getTime();
+    while(t<=e){ HOLIDAY_2026.push(dstr(new Date(t))); t+=step; } }
+})();
+const MAKEUP_2026=new Set(['2026-01-04','2026-02-14','2026-02-28','2026-05-09','2026-09-20','2026-10-10']);
+function isWorkday(k){
+  if(MAKEUP_2026.has(k)) return true;               /* 调休补班：周末也上班 */
+  if(HOLIDAY_2026.indexOf(k)>=0) return false;      /* 法定假期：休息 */
+  const d=parseD(k); return d.getDay()!==0 && d.getDay()!==6; /* 其余按周几：Mon~Fri 上班 */
+}
+/* 标准工作窗口（v3.13 起）：工作日里只算 9:00-12:00 与 13:30-18:00 为「标准工作时间」。
+   用「分钟-of-day」表示：9:00=540, 12:00=720(不含), 13:30=810, 18:00=1080(不含)。
+   标准工作时长 = (720-540) + (1080-810) = 180+270 = 450 分钟 = 7.5 小时/工作日（常数）。 */
+function inStdWindow(m){ return (m>=540 && m<720) || (m>=810 && m<1080); }
+const STD_WORK_SEC_PER_DAY = (720-540 + 1080-810) * 60;  /* 27000 秒 = 7.5h */
+
 function dayTotals(k){
   let keys=0,bs=0,act=0,mv=0,ck=0,sc=0,meq=0;
   for(const r of dataMinute(k)){ keys+=r[1];bs+=r[2];act+=r[3];mv+=r[4];ck+=r[5];sc+=r[6];meq+=mouseEquiv(r); }
@@ -477,9 +594,20 @@ for(const k of DAY_KEYS) maxDayEquiv=Math.max(maxDayEquiv,dayTotals(k).equiv);
 const lvOf=(v)=> v<=0?0:Math.min(5,1+Math.floor(Math.sqrt(v/maxDayEquiv)*4.999));
 
 let ALL_KEYS=0,ALL_BS=0,ALL_ACT=0,ALL_MV=0,ALL_CK=0,ALL_SC=0,ALL_MEQ=0,BEST_DAY=null,BEST_EQUIV=0;
-/* 逐小时柱图刻度的分子：全周期里**任何一天**的逐小时综合活跃峰值。 */
+/* 工作日口径的汇总（只含 isWorkday(k) 为真的日期）：逐小时平均柱 与 日均汇总指标 都用它。
+   ALL_* 仍保留全周期总量（供刻度的 dayHourPeak / 周几人设 / 最佳一天 使用，不在「只统计工作日」范围内）。 */
+let WD_KEYS=0,WD_BS=0,WD_ACT=0,WD_MV=0,WD_CK=0,WD_SC=0,WD_MEQ=0,wdDayCount=0;
+/* v3.13 工作时长模型（仅工作日）：
+   WD_STD_WORK = 标准工作时长合计（= 工作日天数 × 7.5h，固定常数，与是否有活动无关）
+   WD_ACT_WORK = 实际工作时长合计（每天「首次有活动分钟 ~ 末次有活动分钟」跨度之和）
+   WD_STD_ACT  = 标准活跃时长合计（工作日里落在标准窗口内的 active_secs 之和）
+   WD_OT       = 加班时长合计（实际工作跨度中落在标准窗口「外」的分钟 × 60）
+   注：WD_ACT 仍是「实际活跃时长合计」（窗口内+窗口外全部活跃秒），对应需求 #5。 */
+let WD_STD_WORK=0,WD_ACT_WORK=0,WD_STD_ACT=0,WD_OT=0;
+/* 逐小时柱图刻度的分子：全周期里**任何一天**的逐小时综合活跃峰值（含全部日期，保证当天线不溢出）。 */
 let dayHourPeak=1;
 const hourTotals=new Array(24).fill(0), dowTotals=new Array(7).fill(0), dowCount=new Array(7).fill(0);
+const wdHourTotals=new Array(24).fill(0);
 for(const k of DAY_KEYS){
   const t=dayTotals(k); const d=parseD(k); const di=(d.getDay()+6)%7;
   ALL_KEYS+=t.keys;ALL_BS+=t.bs;ALL_ACT+=t.act;ALL_MV+=t.mv;ALL_CK+=t.ck;ALL_SC+=t.sc;ALL_MEQ+=t.meq;
@@ -488,12 +616,34 @@ for(const k of DAY_KEYS){
   const arr=new Array(24).fill(0);
   for(const r of dataMinute(k)) arr[Math.floor(r[0]/60)] += r[1]+mouseEquiv(r);
   for(let h=0;h<24;h++){ hourTotals[h]+=arr[h]; if(arr[h]>dayHourPeak) dayHourPeak=arr[h]; }
+  if(isWorkday(k)){
+    WD_KEYS+=t.keys;WD_BS+=t.bs;WD_ACT+=t.act;WD_MV+=t.mv;WD_CK+=t.ck;WD_SC+=t.sc;WD_MEQ+=t.meq;
+    wdDayCount++;
+    for(let h=0;h<24;h++) wdHourTotals[h]+=arr[h];
+    /* —— 工作时长模型（v3.13）—— */
+    WD_STD_WORK += STD_WORK_SEC_PER_DAY;          /* 标准工作时长 = 常数 7.5h/工作日 */
+    let fM=-1,lM=-1,stdAct=0;
+    for(const r of dataMinute(k)){
+      const m=r[0];
+      if(r[1]>0||r[4]>0||r[5]>0||r[6]>0){ if(fM<0) fM=m; lM=m; }  /* 首次~末次有活动分钟 */
+      if(inStdWindow(m)) stdAct += r[3];          /* 标准窗口内的活跃秒 */
+    }
+    const actWorkSec = fM>=0 ? (lM-fM)*60 : 0;    /* 实际工作时长 = 跨度（分钟）×60 */
+    WD_ACT_WORK += actWorkSec;
+    WD_STD_ACT  += stdAct;
+    /* 加班 = 实际工作跨度中落在标准窗口「外」的分钟 */
+    let otMin=0;
+    if(fM>=0){ for(let m=fM;m<=lM;m++){ if(!inStdWindow(m)) otMin++; } }
+    WD_OT += otMin*60;
+  }
 }
-/* 全周期「同时段平均」（与当天柱同口径：击键 + 鼠标当量）。
-   它是**固定**的 —— 不随选中日期变化，所以是稳定的"典型一天"基线，而不是跟着当天上下浮动。
-   天数可能为 0（空数据态），用 Math.max(1,…) 兜住除零。 */
-const avgByHour=hourTotals.map(v=>v/Math.max(1,DAY_KEYS.length));
-/* 逐小时柱图的**固定刻度** —— 全周期所有日期的逐小时峰值 与 平均序列峰值 取大者。
+/* 「工作日同时段平均」（与当天柱同口径：击键 + 鼠标当量）。
+   ⚠ 只统计工作日（isWorkday）：剔除周末与法定假期（含调休补班视为上班），
+     基线不再被"国庆/中秋你休息"那种低活跃日拉低 —— 这才是「典型工作日」的轮廓。
+   它是**固定**的 —— 不随选中日期变化，是稳定的"典型工作日"基线。
+   天数可能为 0（空数据态 / 全是假期），用 Math.max(1,…) 兜住除零。 */
+let avgByHour=wdHourTotals.map(v=>v/Math.max(1,wdDayCount));
+/* 逐小时柱图的**固定刻度** —— 全周期所有日期的逐小时峰值 与 工作日平均序列峰值 取大者。
    ⚠ 刻度绝不能随选中日期变：参考序列是常量，刻度一变，参考柱的高度就会跟着变
      （实测过：`mx = max(当天峰值, 平均峰值)` 逐日重算，同一根参考柱在不同日期
      高度极差 385.8px、最高的一天比最低那天高 53%）—— 观感上"基线自己在动"，
@@ -503,10 +653,27 @@ const HOUR_AXIS=Math.max(1,dayHourPeak,...avgByHour);
 /* 抽成函数只为让「反向验证」能替换它（`--datescale` 注入回旧的逐日刻度），
    渲染路径本身仍只有一份。 */
 function hourAxisMax(){ return HOUR_AXIS; }
-const MOUSE_SHARE=(ALL_KEYS+ALL_MEQ)?(ALL_MEQ/(ALL_KEYS+ALL_MEQ)*100):0;
+/* 反向验证钩子：探针可强制切回「全部日期平均」(true) 或「工作日平均」(false/默认) 并重绘当天，
+   从而验证平均柱是否真的只统计工作日。 */
+window.__redrawDayAvg=function(allDays){
+  avgByHour = allDays
+    ? hourTotals.map(v=>v/Math.max(1,DAY_KEYS.length))
+    : wdHourTotals.map(v=>v/Math.max(1,wdDayCount));
+  if(typeof selectedDay!=='undefined' && selectedDay) drawBars(selectedDay);
+  return avgByHour.slice();
+};
 const ALL_EQUIV=ALL_KEYS+ALL_MEQ;
-const ACTIVE_MIN=DAY_KEYS.reduce((a,k)=>a+dataMinute(k).filter(r=>r[1]>0||r[4]>0||r[5]>0||r[6]>0).length,0);
-const TOTAL_EQUIV=ALL_EQUIV;
+const WD_EQUIV=WD_KEYS+WD_MEQ;
+const WD_ACTIVE_MIN=DAY_KEYS.filter(isWorkday).reduce((a,k)=>a+dataMinute(k).filter(r=>r[1]>0||r[4]>0||r[5]>0||r[6]>0).length,0);
+const MOUSE_SHARE=(WD_KEYS+WD_MEQ)?(WD_MEQ/(WD_KEYS+WD_MEQ)*100):0;
+const TOTAL_EQUIV=WD_EQUIV;
+/* 工作时长模型（v3.13）衍生量。WD_ACT 已是「实际活跃时长合计」（窗口内+外全部活跃秒）。 */
+const WD_STD_WORK_H =WD_STD_WORK/3600;
+const WD_ACT_WORK_H =WD_ACT_WORK/3600;
+const WD_STD_ACT_H  =WD_STD_ACT/3600;
+const WD_OT_H       =WD_OT/3600;
+const WD_STD_RATIO  =WD_STD_WORK>0 ? WD_STD_ACT/WD_STD_WORK*100 : 0;  /* 标准活跃占比 */
+const WD_ACT_RATIO  =WD_ACT_WORK>0 ? WD_ACT/WD_ACT_WORK*100   : 0;     /* 实际活跃占比 */
 
 /* 单色相饱和度色阶（ember 色相，靠 S/L 区分热度；深浅色各自适配） */
 function hueColor(t){
@@ -539,28 +706,20 @@ document.getElementById('hero-title').textContent='你这 '+DAY_KEYS.length+' �
 const bestDow='日一二三四五六'[parseD(BEST_DAY).getDay()];
 const bestHr=hourTotals.indexOf(Math.max(...hourTotals));
 document.getElementById('hero-desc').textContent='最热的一天是 '+BEST_DAY+'（'+bestDow+'），全周期最活跃的小时是 '+pad2(bestHr)+':00 前后。'+desc;
-const daysN=DAY_KEYS.length||1;
-/* 头部三卡（用户指定替换）：① 日均活跃时长 ② 日均击键数 ③ 活跃时长占比。
-   活跃时长占比 = 全周期「有活跃击键的时长（活跃秒 ALL_ACT）」
-                 ÷ 全周期「工作总时长」（每天首次有活动分钟 ~ 末次有活动分钟之差，跨天累加）；
-   工作总时长表示「人待在键盘前的总跨度」，该占比即其中真正在输入的比例。 */
-let totalWorkSpanSec=0;
-for(const k of DAY_KEYS){
-  let fM=-1,lM=-1;
-  for(const r of dataMinute(k)){
-    if(r[1]>0||r[4]>0||r[5]>0||r[6]>0){ if(fM<0) fM=r[0]; lM=r[0]; }
-  }
-  if(fM>=0) totalWorkSpanSec+=(lM-fM)*60;
-}
-const avgActiveHours=(ALL_ACT/3600)/daysN;
-const avgKeys=ALL_KEYS/daysN;
-const activeRatio=totalWorkSpanSec>0?(ALL_ACT/totalWorkSpanSec*100):0;
+/* ⚠ 日均汇总指标全部按「工作日口径」（与逐小时平均柱一致）：分子用 WD_* 工作日总量，分母用 wdDayCount 工作日天数。 */
+const daysN=Math.max(1,wdDayCount);
+/* 头部三卡：① 工作日日均活跃时长 ② 工作日日均击键数 ③ 实际活跃占比。
+   实际活跃占比 = 工作日实际活跃时长（活跃秒 WD_ACT）÷ 工作日实际工作时长（WD_ACT_WORK =
+   每天「首次~末次有活动分钟」跨度之和）；含义：「人待在键盘前的跨度里，真正在输入的比例」。 */
+const avgActiveHours=(WD_ACT/3600)/daysN;
+const avgKeys=WD_KEYS/daysN;
+const activeRatio=WD_ACT_RATIO;   /* == WD_ACT/WD_ACT_WORK，与总览「实际活跃占比」同源 */
 /* 三卡与总览砖块同一套契约：顶色条 = 族色、右上角标 = 族名；
-   右列补一条同源推导的次要信息（全周期总量 / 工作总跨度）填掉 321px 宽卡右侧那 208px 白。 */
+   右列补一条同源推导的次要信息（工作日合计 / 实际工作时长）填掉 321px 宽卡右侧那 208px 白。 */
 const heroStats=[
-  ['日均活跃时长',avgActiveHours,'小时',1,'var(--tm)','时间','全周期 '+(ALL_ACT/3600).toFixed(1)+' 小时'],
-  ['日均击键数',avgKeys,'',0,'var(--kb)','键盘','全周期 '+fmtShort(Math.round(ALL_KEYS))+' 次'],
-  ['活跃时长占比',activeRatio,'%',1,'var(--tm)','效率','工作总时长 '+(totalWorkSpanSec/3600).toFixed(1)+' 小时']];
+  ['工作日日均活跃时长',avgActiveHours,'小时',1,'var(--tm)','时间','工作日合计 '+(WD_ACT/3600).toFixed(1)+' 小时'],
+  ['工作日日均击键数',avgKeys,'',0,'var(--kb)','键盘','工作日合计 '+fmtShort(Math.round(WD_KEYS))+' 次'],
+  ['实际活跃占比',activeRatio,'%',1,'var(--tm)','效率','实际工作时长 '+WD_ACT_WORK_H.toFixed(1)+' 小时']];
 document.getElementById('hero-stats').innerHTML=heroStats.map(([k,v,u,d,tc,tk,side])=>
   '<div class="tile wide" style="--a:auto;--tc:'+tc+'">'+
     '<span class="tk">'+tk+'</span>'+
@@ -573,36 +732,63 @@ heroStats.forEach((s,i)=>countUp(hEls[i],s[1],s[2],s[3]));
 /* 总览：铺地砖式语义排布
    一块「输入构成」主砖把键盘占比 / 鼠标占比用双环图并置——二者天然互补，
    并置即表达"同一件事的两面"。主砖**同属键盘行与鼠标行**，故纵向横跨这两行、置于行末；
-   时间行是独立维度，单独一行铺底部。区域名 kb / ms / tm = 键盘行 / 鼠标行 / 时间行；
-   窄屏 auto-fill 时按 [键盘3,鼠标3,时间3] 的数组顺序填充，同样保持同类相邻。
-   文字位置全砖统一（标签左上 / 数值左下）：主砖的标题与底部数字用同一套对齐，
-   时间行三块较宽，左列沿用同一套对齐、右列放一条同源推导的次要信息填掉空白。 */
+   底部是时间维度，**按语义关系分三段**（v3.15）：概览组 g1-g3（无对照对象，日均活跃升为大砖）
+   → 对照组 s1-s3 与 a1-a3（标准侧 / 实际侧，**逐列严格对齐**，同一列 = 同一维度）
+   → 加班 ot（满宽收尾，承接对照区）。
+   窄屏 auto-fill 时按 [键盘3, 鼠标3, 概览3, 标准3, 实际3, 加班] 的数组顺序填充，同类仍相邻。
+   ⚠ 概览(g1-g3)、标准(s1-s3)、实际(a1-a3)、加班(ot) 的区域名必须与上面
+     `grid-template-areas` 逐一对应，否则宽屏会开幻影轨道而错位。
+   文字位置全砖统一（标签左上 / 数值左下），次要信息统一为数值下方小字 `.sub`。 */
 function renderClusteredStats(){
-  const hours=ALL_ACT/3600;
-  const avgRate=ACTIVE_MIN?Math.round(ALL_EQUIV/ACTIVE_MIN):0;
-  const bsRate=(ALL_KEYS+ALL_BS)?(ALL_BS/(ALL_KEYS+ALL_BS)*100):0;
-  const perDay=DAY_KEYS.length?Math.round(ALL_EQUIV/DAY_KEYS.length):0;
-  const days=DAY_KEYS.length||1;
+  /* 隐藏 dump：把工作时长模型的聚合量序列化进 DOM，供离屏探针核对（display:none 不影响 --dump-dom 抓取）。 */
+  const WT_JSON=JSON.stringify({stdWork:WD_STD_WORK,stdAct:WD_STD_ACT,actWork:WD_ACT_WORK,actActive:WD_ACT,ot:WD_OT,stdRatio:WD_STD_RATIO,actRatio:WD_ACT_RATIO,days:wdDayCount});
+  const hours=WD_ACT/3600;
+  const avgRate=WD_ACTIVE_MIN?Math.round(WD_EQUIV/WD_ACTIVE_MIN):0;
+  const bsRate=(WD_KEYS+WD_BS)?(WD_BS/(WD_KEYS+WD_BS)*100):0;
+  const perDay=wdDayCount?Math.round(WD_EQUIV/wdDayCount):0;
+  const days=Math.max(1,wdDayCount);
   const KSHARE=MOUSE_SHARE?(100-MOUSE_SHARE):0;
-  /* 区域名按「所在行 + 行内序」命名：kb / ms / tm 前缀分别对应键盘行 / 鼠标行 / 时间行，
-     数组顺序 [键盘3, 鼠标3, 时间3] 保证窄屏 auto-fill 自填时同类仍相邻。 */
+  /* 区域名按「所在组 + 组内序」命名，**组的划分依据是语义关系而非排版方便**：
+       g*  = 概览组（全周期量，无对照对象）
+       s1~ = 标准侧（工作/活跃/占比 三位）
+       a1~ = 实际侧（与标准侧**逐列对齐**，构成严格对照）
+       ot  = 加班（跨度落在标准窗口外的部分）
+     键盘行 kb1-3 / 鼠标行 ms1-3 沿用；comp 主砖跨 kb+ms 两行。
+     数组顺序 [键盘3, 鼠标3, 概览, 标准3, 实际3, 加班] 保证窄屏 auto-fill 自填时同类仍相邻。 */
   const tiles=[
-    {a:'kb1', tc:'var(--kb)', tk:'键盘', k:'总击键数', v:ALL_KEYS, u:'', d:0},
+    {a:'kb1', tc:'var(--kb)', tk:'键盘', k:'总击键数', v:WD_KEYS, u:'', d:0},
     {a:'kb2', tc:'var(--kb)', tk:'键盘', k:'退格占比', v:bsRate, u:'%', d:1},
     {a:'kb3', tc:'var(--kb)', tk:'键盘', k:'活跃时段均速', v:avgRate, u:'活跃/分', d:0},
-    {a:'ms1', tc:'var(--ms)', tk:'鼠标', k:'鼠标移动', v:fmtShort(ALL_MV), u:'次', num:false},
-    {a:'ms2', tc:'var(--ms)', tk:'鼠标', k:'鼠标点击', v:fmtShort(ALL_CK), u:'次', num:false},
-    {a:'ms3', tc:'var(--ms)', tk:'鼠标', k:'鼠标滚轮', v:fmtShort(ALL_SC), u:'格', num:false},
-    {a:'tm1', tc:'var(--tm)', tk:'时间', k:'活跃时长', v:hours, u:'小时', d:1, wide:true, side:'日均 '+(hours/days).toFixed(1)+' 小时'},
-    {a:'tm2', tc:'var(--tm)', tk:'时间', k:'日均活跃', v:fmtShort(perDay), u:'', num:false, wide:true, side:'共 '+days+' 个活跃日'},
-    {a:'tm3', tc:'var(--tm)', tk:'时间', k:'最热一天', v:BEST_DAY?BEST_DAY.slice(5):'--', u:'', num:false, wide:true, side:BEST_DAY?'当量 '+fmtShort(Math.round(BEST_EQUIV)):'--'},
+    {a:'ms1', tc:'var(--ms)', tk:'鼠标', k:'鼠标移动', v:fmtShort(WD_MV), u:'次', num:false},
+    {a:'ms2', tc:'var(--ms)', tk:'鼠标', k:'鼠标点击', v:fmtShort(WD_CK), u:'次', num:false},
+    {a:'ms3', tc:'var(--ms)', tk:'鼠标', k:'鼠标滚轮', v:fmtShort(WD_SC), u:'格', num:false},
+    /* ── 概览组：无「标准/实际」对照对象，故给大砖（6/12 + 3/12 + 3/12），与下方对照区拉开层级 ──
+       g1 日均活跃是「人/天」强度的代表（最大的一块 → 一眼看到平均每天投入多少）；
+       g2/g3 是「峰值 / 节奏」的补充，体量次之但仍属概览层，与对照区视觉分离。 */
+    {a:'g1', tc:'var(--tm)', tk:'时间', k:'日均活跃', v:fmtShort(perDay), u:'', num:false, sub:'工作日「击键 + 鼠标当量」合计 ÷ '+days+' 个工作日', subS:'工作日当量 ÷ '+days+' 天', big:true},
+    {a:'g2', tc:'var(--tm)', tk:'时间', k:'活跃时长', v:hours, u:'小时', d:1, sub:'全时段活跃秒累计', subS:'全时段累计'},
+    {a:'g3', tc:'var(--tm)', tk:'时间', k:'最热一天', v:BEST_DAY?BEST_DAY.slice(5):'--', u:'', num:false, sub:BEST_DAY?'当量 '+fmtShort(Math.round(BEST_EQUIV)):'--'},
+    /* ── 对照组：标准侧 s1-s3 与实际侧 a1-a3 **逐列严格对齐**（同一列 = 同一维度）——
+          工作时长 ↔ 工作时长、活跃时长 ↔ 活跃时长、活跃占比 ↔ 活跃占比。
+          标准侧是「制度/口径」，实际侧是「观测/事实」，两行相接即可直接读出差额与比率。
+          sub=宽屏完整口径；subS=窄屏短版（≤900 卡高 92px、宽 ~126px，长句必被省略号截断）。 ── */
+    {a:'s1', tc:'var(--tm)', tk:'标准', k:'标准工作时长', v:WD_STD_WORK_H, u:'小时', d:1, sub:'9:00–12:00 + 13:30–18:00', subS:'固定 7.5h/日'},
+    {a:'s2', tc:'var(--tm)', tk:'标准', k:'标准活跃时长', v:WD_STD_ACT_H, u:'小时', d:1, sub:'窗口内活跃秒 · 日均 '+(WD_STD_ACT_H/days).toFixed(1)+' 小时', subS:'窗口内活跃秒'},
+    {a:'s3', tc:'var(--tm)', tk:'标准', k:'标准活跃占比', v:WD_STD_RATIO, u:'%', d:1, sub:'标准活跃 ÷ 标准工作', subS:'标准口径'},
+    {a:'a1', tc:'var(--tm)', tk:'实际', k:'实际工作时长', v:WD_ACT_WORK_H, u:'小时', d:1, sub:'首末活动跨度 · 日均 '+(WD_ACT_WORK_H/days).toFixed(1)+' 小时', subS:'首末活动跨度'},
+    {a:'a2', tc:'var(--tm)', tk:'实际', k:'实际活跃时长', v:hours, u:'小时', d:1, sub:'全时段活跃秒 · 日均 '+(hours/days).toFixed(1)+' 小时', subS:'全时段活跃秒'},
+    {a:'a3', tc:'var(--tm)', tk:'实际', k:'实际活跃占比', v:WD_ACT_RATIO, u:'%', d:1, sub:'实际活跃 ÷ 实际工作', subS:'实际口径'},
+    /* ── 加班：独立于两组对照（是「实际跨度里落在标准窗口外」的第三类时间），
+          逻辑上承接对照区，故置于其下并横贯整行。⚠ 它**不是**「实际工作 − 标准工作」
+          （午休等窗口内无活动的分钟计入跨度但不计入加班），文案不可写成「两者之差」。 ── */
+    {a:'ot', tc:'var(--tm)', tk:'加班', k:'加班时长', v:WD_OT_H, u:'小时', d:1, sub:'超标准窗口', subS:'超窗口', full:true},
   ];
   const host=document.getElementById('stats');
   host.innerHTML=
     '<div class="tile comp" style="--a:comp">'+
       '<div class="comp-info">'+
         '<div class="comp-h">输入构成<span>键盘 / 鼠标 占总输入当量</span></div>'+
-        '<div class="comp-foot">总输入当量 <b>'+fmt(ALL_EQUIV)+'</b></div>'+
+        '<div class="comp-foot">总输入当量 <b>'+fmt(WD_EQUIV)+'</b></div>'+
       '</div>'+
       '<div class="donuts">'+
         '<div class="donut-wrap"><div class="donut" id="donut-kb" style="--c:var(--kb)"><span class="pct">0%</span></div><div class="dlab">⌨ 键盘</div></div>'+
@@ -610,16 +796,23 @@ function renderClusteredStats(){
       '</div>'+
     '</div>'+
     tiles.map(t=>{
+      /* 窄屏（≤900px，与 CSS 媒体查询同一个断点）改用短版小字：卡高 92px / 宽 ~126px，
+         完整口径句放不下会被省略号截断。断点用 matchMedia 而非 innerWidth，
+         与 CSS 判定保持同一来源（改 CSS 时这里跟着改）。 */
+      const narrow=window.matchMedia('(max-width:900px)').matches;
+      const subTxt=(narrow&&t.subS)?t.subS:(t.sub||'');
       const vHtml='<div class="v"><span class="n"></span>'+(t.u?'<small>'+t.u+'</small>':'')+'</div>';
-      return '<div class="tile'+(t.wide?' wide':'')+'" style="--a:'+t.a+';--tc:'+t.tc+'">'+
+      return '<div class="tile'+(t.wide?' wide':'')+(t.big?' big':'')+(t.wrap?' wrap':'')+(t.full?' full':'')+'" data-tk="'+t.tk+'" style="--a:'+t.a+';--tc:'+t.tc+'">'+
         '<span class="tk">'+t.tk+'</span>'+
         /* 宽砖：左列仍是「标签上 / 数值下」（与其余砖左缘对齐），右列放次要信息填满宽度 */
         (t.wide
           ? '<div class="wmain"><div class="k">'+t.k+'</div>'+vHtml+'</div>'+
             '<div class="wside">'+(t.side||'')+'</div>'
-          : '<div class="k">'+t.k+'</div>'+vHtml)+
+          : '<div class="k">'+t.k+'</div>'+
+            /* 常规砖（含大砖 / 加班）：次要信息为数值下方小字 .sub，用 .vbox 与数值一起贴底 */
+            (subTxt ? '<div class="vbox">'+vHtml+'<div class="sub">'+subTxt+'</div></div>' : vHtml))+
       '</div>';
-    }).join('');
+    }).join('')+'<pre id="WT" style="display:none">'+WT_JSON+'</pre>';
   let i=0;
   tiles.forEach(t=>{
     const span=host.querySelectorAll('.tile .n')[i++];
@@ -725,16 +918,26 @@ function drawBars(k){
     const av=avgByHour[h];
     const avgBar=av>0
       ? '<div class="bar bar-avg" data-v="'+Math.round(av)+'" style="height:'+(av/mx*100).toFixed(1)+'%"'
-        +' title="'+pad2(h)+':00 历史平均 — 综合活跃 '+fmt(Math.round(av))+'"></div>'
+        +' title="'+pad2(h)+':00 工作日平均 — 综合活跃 '+fmt(Math.round(av))+'"></div>'
       : '<div class="bar bar-avg off" data-v="0" style="height:2%"'
-        +' title="'+pad2(h)+':00 历史平均 — 无活动"></div>';
-    const dayBar=eq>0
-      ? '<div class="bar" data-v="'+Math.round(eq)+'" style="height:'+Math.max(3,eq/mx*100).toFixed(1)+'%"'
-        +' title="'+pad2(h)+':00 — 键 '+fmt(hourly[h])+' · 鼠 '+fmt(hourlyMv[h])+' 次移动，'+(hourlyAct[h]/60).toFixed(0)+' 分钟活跃｜历史平均 '+fmt(Math.round(av))+'">'
-        +'<div class="bar-m" style="height:'+Math.min(100,hourlyMeq[h]/eq*100).toFixed(1)+'%"></div></div>'
-      : '<div class="bar off" data-v="0" style="height:2%"'
-        +' title="'+pad2(h)+':00 — 当天无活动｜历史平均 '+fmt(Math.round(av))+'"></div>';
-    return '<div class="bh">'+dayBar+avgBar+'</div>';
+        +' title="'+pad2(h)+':00 工作日平均 — 无活动"></div>';
+    /* 当天 = 同轴竖线 + 菱形尖端（v3.12）。鼠标段仍是线底部那一段，语义不变（"柱底=鼠标折算"）。
+       ⚠ 菱形**跟随线顶端的颜色**：某个小时全部活跃都来自鼠标时（mPct≈100）线通体是鼠标色，
+         此时菱形若还写死 --accent-2，线的顶端就会"换个颜色"，看起来像叠了第三个元素。
+       ⚠ 当天无活动时不画线（不要退化成 2% 的灰线当作"有值"）：那一格的"有没有内容"
+         由底层平均柱承担 —— 平均柱有高度就说明"这天该时段比平时闲"，不必再画一根零长度的线。 */
+    const mPct = eq>0 ? Math.min(100,hourlyMeq[h]/eq*100) : 0;
+    const dayLine=eq>0
+      ? '<div class="dline" data-v="'+Math.round(eq)+'" data-meq="'+Math.round(hourlyMeq[h])+'"'
+        +' style="height:'+Math.max(3,eq/mx*100).toFixed(1)+'%"'
+        +' title="'+pad2(h)+':00 — 键 '+fmt(hourly[h])+' · 鼠 '+fmt(hourlyMv[h])+' 次移动，'+(hourlyAct[h]/60).toFixed(0)+' 分钟活跃｜工作日平均 '+fmt(Math.round(av))+'">'
+        +'<i class="bar-m" style="height:'+mPct.toFixed(1)+'%"></i>'
+        +'<i class="dl-tip" style="background:'+(mPct>=99.5?'var(--mouse)':'var(--accent-2)')+'"></i></div>'
+      : '';
+    /* 每格把当天的综合活跃挂到 .bh 上（`data-eq`）：探针要断言「eq=0 的格不该有线」，
+       而"当天无活动"在 DOM 里除了一根缺席的线之外没有任何痕迹 —— 没有这个真值，
+       探针只能自己再算一遍 eq（就是第二份实现，口径迟早漂移）。 */
+    return '<div class="bh" data-eq="'+Math.round(eq)+'">'+avgBar+dayLine+'</div>';
   }).join('');
   document.getElementById('bar-x').innerHTML=hourly.map((_,h)=>'<div'+(h%3?' class="hide"':'')+'>'+(h%3===0?pad2(h):'')+'</div>').join('');
 }
@@ -866,10 +1069,12 @@ function attachTips(scope){ scope.querySelectorAll('[data-tip]').forEach(el=>{
 
 /* 按钮 */
 document.getElementById('btn-copy').onclick=()=>{
-  const txt=['键盘热度报告 '+META.range,
-    '日均活跃时长：'+avgActiveHours.toFixed(1)+' 小时（全周期 '+(ALL_ACT/3600).toFixed(1)+' 小时）',
-    '日均击键数：'+fmt(Math.round(avgKeys))+' 次（全周期 '+fmt(ALL_KEYS)+' 次）',
-    '活跃时长占比：'+activeRatio.toFixed(1)+'%（工作总时长 '+(totalWorkSpanSec/3600).toFixed(1)+' 小时）',
+  const txt=['键盘热度报告 '+META.range+'（统计口径：仅工作日，剔除周末与法定假期，含调休补班）',
+    '工作日日均活跃时长：'+avgActiveHours.toFixed(1)+' 小时（工作日合计 '+(WD_ACT/3600).toFixed(1)+' 小时）',
+    '工作日日均击键数：'+fmt(Math.round(avgKeys))+' 次（工作日合计 '+fmt(WD_KEYS)+' 次）',
+    '实际活跃占比：'+activeRatio.toFixed(1)+'%（实际活跃 '+(WD_ACT/3600).toFixed(1)+' 小时 / 实际工作 '+WD_ACT_WORK_H.toFixed(1)+' 小时）',
+    '标准工作时长：'+WD_STD_WORK_H.toFixed(1)+' 小时（标准活跃 '+WD_STD_ACT_H.toFixed(1)+' 小时，占比 '+WD_STD_RATIO.toFixed(1)+'%）',
+    '加班时长：'+WD_OT_H.toFixed(1)+' 小时（实际跨度超出标准窗口部分）',
     '最热一天：'+(BEST_DAY||'--')+'（综合活跃 '+fmt(Math.round(BEST_EQUIV))+'）'].join('\n');
   navigator.clipboard.writeText(txt).then(()=>{const b=document.getElementById('btn-copy');b.textContent='已复制';setTimeout(()=>b.textContent='复制摘要',1400);});
 };

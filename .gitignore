@@ -15,6 +15,10 @@ __pycache__/
 _*.txt
 _*.png
 _*.log
+# 探针写出的临时页面（_ov_probe_1.py 等会把注入脚本的副本写成 _*_tmp.html 再喂给 Chrome）
+_*_tmp.html
+# 手工留存的报告副本（派生产物，可由 report.py 重新生成）
+_*_demo.html
 
 # ===== 报告验证截图与生成产物(data/ 下) =====
 keyboard-heat/data/**/*.png
